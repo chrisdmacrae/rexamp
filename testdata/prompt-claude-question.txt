@@ -1,0 +1,22 @@
+⏺ You closed the deployment target question (Production, Staging or Local only) without picking one, so I'm
+  holding there. What would you like to clarify before you choose?
+
+✻ Sautéed for 5s · done 1:44 AM
+
+❯ Ask me again with AskUserQuestion, same options.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Deploy
+
+Which deployment target do you want?
+
+❯ 1. Production
+     Deploy to the production environment.
+  2. Staging
+     Deploy to the staging environment.
+  3. Local only
+     Keep it local; don't deploy anywhere.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

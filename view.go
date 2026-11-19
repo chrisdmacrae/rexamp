@@ -48,7 +48,7 @@ func (m *model) View() string {
 	parts := []string{
 		credits,
 		box(fmt.Sprintf("Agents in Rex (%d)", len(m.agents())), m.viewAgents(inner)),
-		box("Agents outside Rex", m.viewRemote(inner)),
+		box("Agents outside Rex", m.viewDesktop(inner)+m.viewRemote(inner)),
 		box("Threads", m.viewThreads(inner)),
 		box(fmt.Sprintf("Rex hosts (%d)", len(m.rex.Hosts)), m.viewSessions(inner)),
 	}
@@ -301,6 +301,30 @@ func (m *model) viewRemote(w int) string {
 	return strings.Join(lines, "\n")
 }
 
+// viewDesktop lists the sessions of the Claude and ChatGPT desktop apps, one
+// per line, above the bridge's threads.
+func (m *model) viewDesktop(w int) string {
+	var lines []string
+	for _, s := range m.desktop {
+		st := s.State
+		label := st
+		if st == "blocked" {
+			label = "needs you"
+		}
+		meta := appName(s.App) + "  " + truncate(shortPath(s.Cwd), 16)
+		left := truncate(fmt.Sprintf("%s %-12s %s", stateIcon[st], label+" "+ago(s.Since), s.Task), max(8, w-lipgloss.Width(meta)-1))
+		pad := w - lipgloss.Width(left) - lipgloss.Width(meta)
+		lines = append(lines, stateStyle[st].Render(left)+strings.Repeat(" ", max(1, pad))+dim.Render(meta))
+	}
+	if m.desktopErr != nil {
+		lines = append(lines, errText.Render(truncate("desktop apps: "+m.desktopErr.Error(), w)))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
 func (m *model) viewThreads(w int) string {
 	if m.threads == nil {
 		if m.threadsErr != nil {
@@ -362,7 +386,9 @@ func (m *model) viewSessions(w int) string {
 
 var (
 	threadIDRe = regexp.MustCompile(`T-[0-9a-f-]{36}`)
-	spinnerRe  = regexp.MustCompile(`^[\x{2800}-\x{28FF}]\s*`)
+	// Agents show progress at the start of the title: a braille spinner, or
+	// "[ ! ] Action Required | " while Codex waits for approval.
+	spinnerRe = regexp.MustCompile(`^(?:[\x{2800}-\x{28FF}]\s*|\[ ! \] Action Required \| )`)
 	// Rex names a window "Window" and the start of its ID until it is labeled.
 	defaultWindowRe = regexp.MustCompile(`^Window [0-9a-f]{8}$`)
 	runnerThreadsRe = regexp.MustCompile(`\((\d+ threads?)\)`)

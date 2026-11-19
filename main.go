@@ -1,5 +1,6 @@
 // amp-rex-hud is a terminal HUD for Amp usage and the coding agents (Amp,
-// Claude Code, Codex) running in Rex panes. Run it in a Rex split; see init.lua for a toggle key.
+// Claude Code, Codex) running in Rex panes and in the Claude and ChatGPT
+// desktop apps. Run it in a Rex split; see init.lua for a toggle key.
 package main
 
 import (
@@ -21,6 +22,7 @@ type config struct {
 	lowCredits  float64
 	notify      bool
 	client      string
+	stream      bool // -json: stdout carries JSON lines only
 }
 
 func main() {
@@ -31,15 +33,24 @@ func main() {
 	flag.BoolVar(&cfg.notify, "notify", true, "send a macOS notification when an agent finishes or needs you")
 	flag.StringVar(&cfg.client, "client", os.Getenv("REX_CLIENT"), "Rex app client to show focused panes in (label or ID); empty picks the only app")
 	once := flag.Bool("once", false, "print one plain-text frame and exit")
+	asJSON := flag.Bool("json", false, "run without a screen: write snapshots as JSON lines and read commands from stdin (see stream.go)")
 	flag.Parse()
 
-	// A Rex pane started without a shell doesn't get the login PATH, so add
-	// where amp and rex are usually installed.
+	// A Rex pane started without a shell, or the notch app, doesn't get the
+	// login PATH, so add where amp and rex are usually installed.
 	home, _ := os.UserHomeDir()
 	os.Setenv("PATH", strings.Join([]string{
 		os.Getenv("PATH"), home + "/.local/bin", home + "/.amp/bin", os.Getenv("REX_BIN_DIR"), "/opt/homebrew/bin",
+		home + "/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS",
 	}, ":"))
 
+	if *asJSON {
+		if err := runStream(cfg); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	m := newModel(cfg)
 	if *once {
 		ctx := context.Background()
@@ -47,6 +58,7 @@ func main() {
 		m.usage, m.usageErr = fetchUsage(ctx)
 		m.threads, m.threadsErr = fetchThreads(ctx, 15)
 		m.remote, m.remoteErr = fetchBridge(ctx)
+		m.desktop, m.desktopErr = fetchDesktop(ctx)
 		m.width, m.height = 80, 60
 		fmt.Println(m.View())
 		return
@@ -71,6 +83,10 @@ type (
 		ts  []RemoteThread
 		err error
 	}
+	desktopMsg struct {
+		ss  []DesktopSession
+		err error
+	}
 	threadsMsg struct {
 		ts  []Thread
 		err error
@@ -93,6 +109,8 @@ type model struct {
 	threadsErr error
 	remote     []RemoteThread
 	remoteErr  error
+	desktop    []DesktopSession
+	desktopErr error
 
 	cursor      int
 	width       int
@@ -117,7 +135,7 @@ func newModel(cfg config) *model {
 
 func (m *model) Init() tea.Cmd {
 	m.rexLoading = true
-	return tea.Batch(m.loadRex(), m.loadUsage(), m.loadThreads(), m.loadBridge(), m.waitChange(), tick())
+	return tea.Batch(m.loadRex(), m.loadUsage(), m.loadThreads(), m.loadBridge(), m.loadDesktop(), m.waitChange(), tick())
 }
 
 func tick() tea.Cmd {
@@ -147,6 +165,33 @@ func (m *model) loadRex() tea.Cmd {
 func (m *model) loadUsage() tea.Cmd {
 	m.lastUsage = time.Now()
 	return func() tea.Msg { u, err := fetchUsage(m.ctx); return usageMsg{u, err} }
+}
+
+func (m *model) loadDesktop() tea.Cmd {
+	return func() tea.Msg { ss, err := fetchDesktop(m.ctx); return desktopMsg{ss, err} }
+}
+
+// alertDesktop notifies when a desktop app session finishes or needs you.
+func (m *model) alertDesktop(cur []DesktopSession) {
+	if m.desktop == nil {
+		return
+	}
+	prev := map[string]string{}
+	for _, s := range m.desktop {
+		prev[s.ID] = s.State
+	}
+	for _, s := range cur {
+		was, ok := prev[s.ID]
+		if !ok || was == s.State {
+			continue
+		}
+		switch {
+		case s.State == "blocked":
+			m.notify(appName(s.App)+" needs you", s.Task, "")
+		case s.State == "done" && was == "working":
+			m.notify(appName(s.App)+" finished", s.Task, "")
+		}
+	}
 }
 
 func (m *model) loadBridge() tea.Cmd {
@@ -249,7 +294,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			m.status = "Refreshing…"
 			m.rexLoading = true
-			return m, tea.Batch(m.loadRex(), m.loadUsage(), m.loadThreads())
+			return m, tea.Batch(m.loadRex(), m.loadUsage(), m.loadThreads(), m.loadDesktop())
 		}
 
 	case tea.MouseMsg:
@@ -333,8 +378,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.remote = msg.ts
 		}
 
+	case desktopMsg:
+		m.desktopErr = msg.err
+		if msg.err == nil || msg.ss != nil {
+			m.alertDesktop(msg.ss)
+			m.desktop = msg.ss
+			if m.desktop == nil {
+				m.desktop = []DesktopSession{}
+			}
+		}
+
 	case tickMsg:
-		cmds := []tea.Cmd{tick(), m.loadBridge()}
+		cmds := []tea.Cmd{tick(), m.loadBridge(), m.loadDesktop()}
 		if time.Since(m.lastUsage) >= m.cfg.usageEvery {
 			cmds = append(cmds, m.loadUsage())
 		}
@@ -390,7 +445,9 @@ func (m *model) alertLowCredits() {
 func (m *model) notify(title, subtitle, body string) {
 	// Report it to Rex too, so the HUD's own tab shows the alert when unfocused.
 	text := strings.TrimSpace(title + ": " + subtitle + " " + body)
-	fmt.Fprintf(os.Stdout, "\x1b]7501;state=done:app=amp-rex-hud:msg=%s\x1b\\", base64.StdEncoding.EncodeToString([]byte(text)))
+	if !m.cfg.stream {
+		fmt.Fprintf(os.Stdout, "\x1b]7501;state=done:app=amp-rex-hud:msg=%s\x1b\\", base64.StdEncoding.EncodeToString([]byte(text)))
+	}
 	if !m.cfg.notify {
 		return
 	}

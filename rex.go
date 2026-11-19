@@ -92,6 +92,7 @@ type Pane struct {
 	Msg                     string
 	Since                   time.Time // when State last changed
 	Ports                   []int
+	Prompt                  *Prompt // with blocked: the menu on screen, if any
 }
 
 // IsAgent reports whether a coding agent runs in the pane, whether Amp or
@@ -315,6 +316,13 @@ func inspectPane(ctx context.Context, p *Pane) {
 		if rank := stateRank(r.State); rank > best {
 			best = rank
 			p.State, p.Kind, p.Msg, p.Since = r.State, r.Kind, r.Msg, r.At
+		}
+	}
+
+	if p.IsAgent() && p.State == "blocked" {
+		if out, err := run(ctx, 10*time.Second, "rex", rexArgs(p.Server, "capture", "-s", p.SessionID, "-b", p.BlockID, "--trim")...); err == nil {
+			lines := strings.Split(strings.TrimRight(string(out), " \n"), "\n") // the screen's empty bottom rows
+			p.Prompt = parsePrompt(strings.Join(lines[max(0, len(lines)-60):], "\n"))
 		}
 	}
 
