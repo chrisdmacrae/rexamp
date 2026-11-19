@@ -20,6 +20,7 @@ import (
 //
 //	{"op":"focus","block":"block:…"}         show the pane in the Rex app
 //	{"op":"choose","block":"block:…","option":1} pick a choice of its prompt, from 0
+//	{"op":"reply","block":"block:…","text":"…"}  type an answer and press Return
 //	{"op":"refresh"}                         reload everything now
 
 type streamAgent struct {
@@ -37,6 +38,8 @@ type streamAgent struct {
 	Since   time.Time `json:"since,omitzero"`
 	Ports   []int     `json:"ports,omitempty"`
 	Prompt  *Prompt   `json:"prompt,omitempty"`
+	// Question is what a finished agent asked at the end of its turn.
+	Question string `json:"question,omitempty"`
 }
 
 type streamRemote struct {
@@ -93,6 +96,7 @@ type commandMsg struct {
 	Op     string `json:"op"`
 	Block  string `json:"block"`
 	Option int    `json:"option"`
+	Text   string `json:"text"`
 }
 
 type statusMsg string
@@ -165,6 +169,24 @@ func (s *streamModel) command(c commandMsg) tea.Cmd {
 			}
 			return nil
 		}
+	case "reply":
+		// One line: a newline would send the answer early.
+		text := strings.TrimSpace(strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(c.Text))
+		if text == "" {
+			return nil
+		}
+		return func() tea.Msg {
+			for _, args := range [][]string{
+				{"send", "-s", p.SessionID, "-b", p.BlockID, "--", text},
+				{"send-key", "-s", p.SessionID, "-b", p.BlockID, "enter"},
+			} {
+				if _, err := run(s.ctx, 10*time.Second, "rex", rexArgs(p.Server, args...)...); err != nil {
+					return statusMsg(err.Error())
+				}
+			}
+			s.changed <- struct{}{} // reload Rex to see the agent pick it up
+			return nil
+		}
 	case "choose":
 		if p.Prompt == nil || c.Option < 0 || c.Option >= len(p.Prompt.Options) {
 			return func() tea.Msg { return statusMsg("That prompt is gone.") }
@@ -191,7 +213,7 @@ func (s *streamModel) snapshot() streamSnapshot {
 		snap.Agents = append(snap.Agents, streamAgent{
 			Block: p.BlockID, Host: shortHost(p.Host), Session: p.SessionLabel, Window: p.WindowLabel,
 			Agent: p.Agent, Name: agentName(p.Agent), Task: s.paneTask(p), Cwd: p.Cwd,
-			State: state, Kind: p.Kind, Msg: p.Msg, Since: p.Since, Ports: p.Ports, Prompt: p.Prompt,
+			State: state, Kind: p.Kind, Msg: p.Msg, Since: p.Since, Ports: p.Ports, Prompt: p.Prompt, Question: p.Question,
 		})
 	}
 	for _, t := range s.remoteAgents() {
@@ -367,6 +389,48 @@ func parsePrompt(screen string) *Prompt {
 		pr.Preview = body
 	}
 	return pr
+}
+
+// footerRe matches the status lines agents draw between their answer and
+// the input box: Claude Code's "✻ Cooked for 3s" and update notice, and
+// Codex's "Worked for 3s".
+var footerRe = regexp.MustCompile(`^(✻ |Worked for |.*Update available)`)
+
+// lastQuestion returns the last paragraph an agent wrote above its input
+// box when it ends with a question mark, and "" otherwise. Amp draws the
+// box from "╭", Claude Code puts "❯" under a rule, and Codex starts it with
+// "›". It is a guess from the screen, so it can miss a question or flag a
+// sentence that only ends in one.
+func lastQuestion(screen string) string {
+	lines := strings.Split(screen, "\n")
+	for i := range lines {
+		// Amp draws its scrollbar down the right edge.
+		lines[i] = strings.TrimSpace(strings.TrimRight(lines[i], " █▐▕░▒▓"))
+	}
+	end := len(lines)
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := lines[i]
+		if strings.HasPrefix(l, "╭") || strings.HasPrefix(l, "›") || (strings.HasPrefix(l, "❯") && i > 0 && ruleRe.MatchString(lines[i-1])) {
+			end = i
+			break
+		}
+	}
+	i := end - 1
+	for i >= 0 && (lines[i] == "" || ruleRe.MatchString(lines[i]) || footerRe.MatchString(lines[i])) {
+		i--
+	}
+	var para []string
+	for ; i >= 0 && lines[i] != ""; i-- {
+		para = append([]string{lines[i]}, para...)
+	}
+	if len(para) == 0 || strings.ContainsAny(para[0][:min(len(para[0]), 4)], "┃›❯") {
+		return "" // the user's own message: the agent wrote nothing after it
+	}
+	q := strings.TrimSpace(strings.TrimLeft(strings.Join(para, " "), "⏺• "))
+	if !strings.HasSuffix(q, "?") {
+		return ""
+	}
+	return q
 }
 
 // chooseKeys are the keys that pick choice i of a menu: arrows from the

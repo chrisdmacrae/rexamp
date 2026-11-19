@@ -5,7 +5,7 @@ enum Mode: Equatable {
     case idle // nothing running: the notch alone
     case compact // agents running: the dinosaur and a count beside the notch
     case peek // an agent just finished or failed, and notifications are off
-    case ask // an agent needs an answer, and notifications are off
+    case ask // an agent needs an answer
     case list // clicked open: every agent and usage
 }
 
@@ -82,7 +82,8 @@ struct NotchView: View {
 
     var mode: Mode {
         if model.expanded { return .list }
-        if !model.notifies, model.asking != nil { return .ask }
+        // A waiting agent's choices show without a click, notification or not.
+        if model.asking != nil { return .ask }
         if model.peek != nil || model.peekDesktop != nil { return .peek }
         if model.agents.isEmpty && model.remote.isEmpty && model.desktop.isEmpty { return .idle }
         return .compact
@@ -291,7 +292,10 @@ struct AgentRow: View {
     let agent: Agent
     let now: Date
 
+    @State private var replying = false
+
     var stateLine: String? {
+        if agent.asks { return "Has a question" }
         switch agent.state {
         case "done": return "Finished"
         case "error": return "Failed" + (agent.msg.map { ": \($0)" } ?? "")
@@ -303,8 +307,26 @@ struct AgentRow: View {
     }
 
     var body: some View {
-        ActivityRow(bundle: rexBundle, state: agent.state, title: agent.task, subtitle: "\(agent.name) · \(agent.session)",
-                    detail: stateLine, time: ago(agent.since, now: now), help: agent.cwd) { model.focus(agent) }
+        VStack(alignment: .leading, spacing: 2) {
+            ActivityRow(bundle: rexBundle, state: agent.shownState, title: agent.task, subtitle: "\(agent.name) · \(agent.session)",
+                        detail: stateLine, time: ago(agent.since, now: now), help: agent.cwd) { model.focus(agent) }
+                .overlay(alignment: .bottomTrailing) {
+                    // A finished agent waits for your next message, so it takes one here.
+                    if agent.state == "done" && !replying {
+                        Button("Reply") { replying = true }
+                            .buttonStyle(.link)
+                            .font(.subheadline)
+                            .padding(.trailing, 8)
+                            .padding(.bottom, 6)
+                    }
+                }
+            if replying {
+                ReplyField(agent: agent) { replying = false }
+                    .padding(.leading, 52)
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 6)
+            }
+        }
     }
 }
 
@@ -482,6 +504,8 @@ struct AskCard: View {
 
     var permission: Bool { agent.kind == "permission" }
     var options: [Option] { agent.prompt?.options ?? [] }
+    /// A question without numbered choices takes a typed answer.
+    var typed: Bool { options.isEmpty && agent.kind != "permission" && agent.kind != "auth" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -498,7 +522,8 @@ struct AskCard: View {
     }
 
     var headline: String {
-        switch agent.kind {
+        if agent.asks { return "\(agent.name) asks" }
+        return switch agent.kind {
         case "question": "\(agent.name) asks"
         case "permission": "\(agent.name) wants permission"
         case "auth": "\(agent.name) needs you to log in"
@@ -530,7 +555,7 @@ struct AskCard: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         } else {
-            Text(agent.prompt?.question ?? agent.msg ?? agent.task)
+            Text(agent.prompt?.question ?? agent.question ?? agent.msg ?? agent.task)
                 .font(.title3)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -551,7 +576,9 @@ struct AskCard: View {
     }
 
     @ViewBuilder var buttons: some View {
-        if options.isEmpty {
+        if typed {
+            ReplyField(agent: agent).controlSize(.large)
+        } else if options.isEmpty {
             HStack {
                 Spacer()
                 Button("Show in Rex") { model.focus(agent) }
@@ -615,6 +642,36 @@ struct AskCard: View {
         let l = label.lowercased()
         if l == "yes" || l.hasPrefix("yes,") || l == "no" || l.hasPrefix("no,") { return fallback }
         return label
+    }
+}
+
+/// A text field that types an answer into an agent's pane and presses Return.
+struct ReplyField: View {
+    @EnvironmentObject var model: NotchModel
+    let agent: Agent
+    var sent: () -> Void = {}
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TextField("Reply to \(agent.name)", text: $text)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .onSubmit(send)
+            Button("Send", action: send)
+                .buttonStyle(.borderedProminent)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .onAppear { focused = true }
+    }
+
+    func send() {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        model.reply(agent, text: t)
+        text = ""
+        sent()
     }
 }
 

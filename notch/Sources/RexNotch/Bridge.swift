@@ -31,7 +31,13 @@ struct Agent: Decodable, Identifiable, Hashable {
     let since: Date?
     let ports: [Int]?
     let prompt: Prompt?
+    let question: String? // what it asked at the end of its turn, when done
     var id: String { block }
+
+    /// It finished by asking you something, so it waits on you like a blocked one.
+    var asks: Bool { state == "done" && question != nil }
+    /// The state to show: one that asks counts as blocked.
+    var shownState: String { asks ? "blocked" : state }
 }
 
 struct RemoteThread: Decodable, Identifiable, Hashable {
@@ -237,14 +243,14 @@ final class NotchModel: ObservableObject {
             if was[a.block] == "blocked" { notifier.remove(id: a.block) }
             guard ["done", "error", "blocked"].contains(a.state) else { continue }
             if notifies {
-                let what = ["done": "finished", "error": "failed", "blocked": "needs you"][a.state]!
-                let body = a.state == "blocked" ? (a.prompt?.question ?? a.msg ?? a.task) : a.task
+                let what = a.asks ? "asks" : ["done": "finished", "error": "failed", "blocked": "needs you"][a.state]!
+                let body = a.question ?? (a.state == "blocked" ? (a.prompt?.question ?? a.msg ?? a.task) : a.task)
                 let permission = a.kind == "permission" && (a.prompt?.options.count ?? 0) >= 2
                 notifier.post(id: a.block, title: "\(a.name) \(what)", subtitle: a.session, body: body,
-                              urgent: a.state != "done", permission: permission, info: ["block": a.block])
+                              urgent: a.shownState != "done", permission: permission, reply: a.state == "done", info: ["block": a.block])
                 continue
             }
-            if a.state == "blocked" { continue } // the notch shows the question
+            if a.shownState == "blocked" { continue } // the notch shows the question
             peek = a
             peekTimer?.invalidate()
             peekTimer = Timer.scheduledTimer(withTimeInterval: 6, repeats: false) { [weak self] _ in
@@ -287,16 +293,16 @@ final class NotchModel: ObservableObject {
     /// Agents, most urgent first, then most recently changed.
     var sorted: [Agent] {
         agents.sorted {
-            let (a, b) = (Self.rank[$0.state] ?? 0, Self.rank[$1.state] ?? 0)
+            let (a, b) = (Self.rank[$0.shownState] ?? 0, Self.rank[$1.shownState] ?? 0)
             if a != b { return a > b }
             return ($0.since ?? .distantPast) > ($1.since ?? .distantPast)
         }
     }
 
     /// A key that changes each time an agent asks something new.
-    static func askKey(_ a: Agent) -> String { a.block + "|" + (a.since.map { "\($0.timeIntervalSince1970)" } ?? "") + "|" + (a.prompt?.question ?? "") }
+    static func askKey(_ a: Agent) -> String { a.block + "|" + (a.since.map { "\($0.timeIntervalSince1970)" } ?? "") + "|" + (a.prompt?.question ?? a.question ?? "") }
 
-    var waiting: [Agent] { sorted.filter { $0.state == "blocked" } }
+    var waiting: [Agent] { sorted.filter { $0.shownState == "blocked" } }
     var asking: Agent? { waiting.first { !dismissed.contains(Self.askKey($0)) } }
     var activeCount: Int {
         agents.filter { $0.state != "idle" }.count + remote.filter { $0.state != "idle" }.count + desktop.filter { $0.state != "idle" }.count
@@ -313,7 +319,7 @@ final class NotchModel: ObservableObject {
         }
         var state: String {
             switch self {
-            case .pane(let a): a.state
+            case .pane(let a): a.shownState
             case .desktop(let d): d.state
             }
         }
@@ -336,7 +342,7 @@ final class NotchModel: ObservableObject {
 
     /// The most urgent state of anything shown, for the icon beside the notch.
     var topState: String {
-        let states = agents.map(\.state) + desktop.map(\.state)
+        let states = agents.map(\.shownState) + desktop.map(\.state)
         return states.max { (Self.rank[$0] ?? 0) < (Self.rank[$1] ?? 0) } ?? "idle"
     }
 
@@ -360,6 +366,12 @@ final class NotchModel: ObservableObject {
         if let l = a.prompt?.options[option].label, l.hasPrefix("Type something") || l.hasPrefix("Chat about") {
             focus(a)
         }
+    }
+
+    /// Types an answer into the agent's pane and presses Return.
+    func reply(_ a: Agent, text: String) {
+        bridge.send(["op": "reply", "block": a.block, "text": text])
+        dismiss(a) // hide it until the agent asks again
     }
 
     func open(_ t: RemoteThread) {

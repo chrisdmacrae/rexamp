@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +67,36 @@ func TestChooseKeys(t *testing.T) {
 		if got := chooseKeys(pr, i); !reflect.DeepEqual(got, want) {
 			t.Errorf("chooseKeys(%d) = %v, want %v", i, got, want)
 		}
+	}
+}
+
+// The done-*.txt screens are real: each agent finished its turn by asking
+// a question in plain text, except Amp's, which ends with a statement.
+func TestLastQuestion(t *testing.T) {
+	read := func(name string) string {
+		b, err := os.ReadFile("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	want := "Which name do you prefer for the project, Juniper or Basalt?"
+	for _, name := range []string{"done-claude.txt", "done-codex.txt"} {
+		if got := lastQuestion(read(name)); got != want {
+			t.Errorf("%s: lastQuestion = %q, want %q", name, got, want)
+		}
+	}
+	amp := read("done-amp.txt")
+	if got := lastQuestion(amp); got != "" {
+		t.Errorf("done-amp.txt: lastQuestion = %q, want none", got)
+	}
+	// The same screen ending in a question; earlier questions don't count.
+	asked := strings.Replace(amp, "if you find you miss questions.", "if you miss questions?", 1)
+	if got := lastQuestion(asked); got != "I'd do 1 now, and add 2 later if you miss questions?" {
+		t.Errorf("amp question = %q", got)
+	}
+	// The user's own message, with nothing after it, is not the agent's.
+	if got := lastQuestion("┃ Should I?\n\n╭──────────\n│\n╰──────────"); got != "" {
+		t.Errorf("user message = %q", got)
 	}
 }

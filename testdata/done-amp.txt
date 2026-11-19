@@ -1,0 +1,21 @@
+ The fix is to stop needing to know whether it was a question. When an agent finishes, it's waiting for your next message anyway, so a typed reply to a finished agent is just its next prompt.    █
+                                                                                                                                                                                                   █
+ Why it happens: each agent tells Rex its own state, and Rex passes it on to the HUD. The HUD only reads the screen for a question when that state is "waiting" (see rex.go). An agent that asks   █
+ in plain text and ends its turn reports "finished", so the notch never treats it as a question.                                                                                                   █
+                                                                                                                                                                                                   █
+ There are three ways to fix it:                                                                                                                                                                   █
+                                                                                                                                                                                                   █
+ 1. Let every finished agent take a typed reply (recommended). Each finished row in the notch gets a reply field, and the finished notification opens it. It's small, it works the same for Amp,   █
+ Claude Code and Codex, and it can't misfire, since it doesn't guess. It reuses the reply command already in the stream. The drawback is that a question gets no special alert.                    █
+ 2. Also guess when a finished agent asked something. When an agent finishes, read the end of its screen. If its last message ends with "?", show it as a question with the ask card and a "has a  █
+ question" notification. It's more noticeable, but it's a guess. Each agent's screen looks different, so it will sometimes miss a question or flag one that isn't.                                 █
+ 3. Have the agents report it themselves. Claude Code hooks and the Amp bridge plugin could mark the end of a turn as a question. It's the most accurate, but it needs a separate change for each  █
+ agent and setup on every machine. Codex has no way to do it today.                                                                                                                                █
+                                                                                                                                                                                                   █
+ I'd do 1 now, and add 2 later if you find you miss questions.                                                                                                                                     █
+
+╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── $···· ─ opus 5.5 ─╮
+│                                                                                                                                                                                                  │
+│                                                                                                                                                                                                  │
+│                                                                                                                                                                                                  │
+╰ ≋ Running Tools ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── ~/Developer/rexamp (main) ─╯

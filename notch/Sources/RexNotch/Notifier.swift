@@ -14,8 +14,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         guard Bundle.main.bundleIdentifier != nil else { return }
         center.delegate = self
         let show = UNNotificationAction(identifier: "show", title: "Show")
+        let reply = UNTextInputNotificationAction(identifier: "reply", title: "Reply", options: [],
+                                                  textInputButtonTitle: "Send", textInputPlaceholder: "Reply")
         center.setNotificationCategories([
             UNNotificationCategory(identifier: "agent", actions: [show], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "reply", actions: [reply, show], intentIdentifiers: []),
             UNNotificationCategory(identifier: "permission", actions: [
                 UNNotificationAction(identifier: "allow", title: "Allow"),
                 UNNotificationAction(identifier: "deny", title: "Deny", options: .destructive),
@@ -29,13 +32,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Posts a notification that replaces any earlier one with the same id,
     /// so each agent has at most one.
-    func post(id: String, title: String, subtitle: String, body: String, urgent: Bool, permission: Bool = false, info: [String: String]) {
+    func post(id: String, title: String, subtitle: String, body: String, urgent: Bool, permission: Bool = false, reply: Bool = false, info: [String: String]) {
         let c = UNMutableNotificationContent()
         c.title = title
         c.subtitle = subtitle
         c.body = body
         c.userInfo = info
-        c.categoryIdentifier = permission ? "permission" : "agent"
+        c.categoryIdentifier = permission ? "permission" : reply ? "reply" : "agent"
         c.threadIdentifier = id
         if urgent { c.sound = .default }
         center.add(UNNotificationRequest(identifier: id, content: c, trigger: nil))
@@ -53,10 +56,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse) async {
         let info = r.notification.request.content.userInfo as? [String: String] ?? [:]
         let action = r.actionIdentifier
-        await MainActor.run { self.respond(action, info) }
+        let text = (r as? UNTextInputNotificationResponse)?.userText
+        await MainActor.run { self.respond(action, info, text) }
     }
 
-    private func respond(_ action: String, _ info: [String: String]) {
+    private func respond(_ action: String, _ info: [String: String], _ text: String?) {
         guard let model else { return }
         if let id = info["desktop"], let s = model.desktop.first(where: { $0.id == id }) {
             model.open(s)
@@ -66,9 +70,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         switch action {
         case "allow": model.choose(a, option: 0)
         case "deny": model.choose(a, option: max(0, (a.prompt?.options.count ?? 1) - 1))
+        case "reply":
+            if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { model.reply(a, text: text) }
         default:
-            // A question is answered in the notch; anything else in its pane.
-            if a.state == "blocked", a.prompt != nil { model.expanded = true } else { model.focus(a) }
+            // Whatever an agent asks is answered in the notch; anything else in its pane.
+            if a.shownState == "blocked" { model.expanded = true } else { model.focus(a) }
         }
     }
 }
