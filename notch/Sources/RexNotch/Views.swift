@@ -266,12 +266,55 @@ struct AgentList: View {
             }
             .font(.system(size: 12.5, design: .monospaced))
             .padding(.horizontal, 2)
-            .padding(.bottom, 6)
+            .padding(.bottom, model.subscriptions.isEmpty ? 6 : 2)
         }
+        ForEach(model.subscriptions) { sub in
+            SubscriptionRow(sub: sub)
+        }
+        if !model.subscriptions.isEmpty { Spacer().frame(height: 4) }
     }
 
     func note(_ s: String, color: Color = .white.opacity(0.45)) -> some View {
         Text(s).font(.system(size: 12)).foregroundStyle(color).lineLimit(2).padding(.vertical, 6).padding(.horizontal, 2)
+    }
+}
+
+/// One line per subscription: each limit window's use, and when it resets.
+struct SubscriptionRow: View {
+    let sub: Subscription
+
+    static func color(_ p: Double) -> Color {
+        p >= 90 ? Palette.error : p >= 75 ? Palette.blocked : Palette.done
+    }
+
+    static func short(_ label: String) -> String {
+        ["5-hour": "5h", "weekly": "7d", "weekly Opus": "7d Opus", "weekly Sonnet": "7d Sonnet"][label] ?? label
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: sub.name == "Codex" ? "chevron.left.forwardslash.chevron.right" : "asterisk")
+                .foregroundStyle(.white.opacity(0.6))
+                .frame(width: 14)
+            Text(sub.name).fontWeight(.semibold)
+            if let e = sub.error, sub.windows.isEmpty {
+                Text(e).foregroundStyle(Palette.error).lineLimit(1)
+            }
+            ForEach(sub.windows, id: \.label) { w in
+                Text("|").foregroundStyle(.white.opacity(0.25))
+                Text(Self.short(w.label)).foregroundStyle(.white.opacity(0.7))
+                Text(String(format: "%.0f%%", w.percent)).foregroundStyle(Self.color(w.percent))
+                if let r = w.resets_at {
+                    Text("↻" + ago(.now, now: r)).foregroundStyle(.white.opacity(0.45))
+                }
+            }
+            if sub.error != nil && !sub.windows.isEmpty {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.error).help(sub.error ?? "")
+            }
+        }
+        .font(.system(size: 12.5, design: .monospaced))
+        .lineLimit(1)
+        .padding(.horizontal, 2)
     }
 }
 

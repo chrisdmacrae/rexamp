@@ -44,24 +44,36 @@ func (m *model) View() string {
 		return panel.Width(inner + 2).Render(heading.Render(title) + "\n" + body)
 	}
 
-	credits := box("Amp credits", m.viewCredits(inner))
-	parts := []string{
-		credits,
-		box(fmt.Sprintf("Agents in Rex (%d)", len(m.agents())), m.viewAgents(inner)),
-		box("Agents outside Rex", m.viewDesktop(inner)+m.viewRemote(inner)),
-		box("Threads", m.viewThreads(inner)),
-		box(fmt.Sprintf("Rex hosts (%d)", len(m.rex.Hosts)), m.viewSessions(inner)),
+	var parts []string
+	if body := m.viewUsage(inner); body != "" {
+		parts = append(parts, box("Usage", body))
 	}
+	// The agents box's body starts after the boxes above it, its top
+	// border, and its heading.
+	top := lipgloss.Height(strings.Join(parts, "\n")) + 2
+	if len(parts) == 0 {
+		top = 2
+	}
+	outside := m.viewDesktop(inner)
+	if m.cfg.amp {
+		outside += m.viewRemote(inner)
+	}
+	parts = append(parts,
+		box(fmt.Sprintf("Agents in Rex (%d)", len(m.agents())), m.viewAgents(inner)),
+		box("Agents outside Rex", firstNonEmpty(strings.TrimSuffix(outside, "\n"), dim.Render("No agents outside Rex."))),
+	)
+	if m.cfg.amp {
+		parts = append(parts, box("Threads", m.viewThreads(inner)))
+	}
+	parts = append(parts, box(fmt.Sprintf("Rex hosts (%d)", len(m.rex.Hosts)), m.viewSessions(inner)))
 	help := dim.Render("j/k or click select · enter or double-click show pane · r refresh · q quit")
 	if m.status != "" {
 		help = m.status
 	}
 	out := strings.Join(parts, "\n") + "\n" + truncate(help, w)
 
-	// Map screen lines to agents for mouse clicks. The agents box starts
-	// after the credits box, its top border, and its heading, and a view
-	// taller than the terminal loses its top lines.
-	top := lipgloss.Height(credits) + 2
+	// Map screen lines to agents for mouse clicks. A view taller than the
+	// terminal loses its top lines.
 	if over := lipgloss.Height(out) - m.height; m.height > 0 && over > 0 {
 		top -= over
 	}
@@ -72,16 +84,81 @@ func (m *model) View() string {
 	return out
 }
 
+// viewUsage shows Amp's credits when amp is installed, then the limits of
+// each Claude and ChatGPT subscription with a login. It is empty when there
+// is none of them.
+func (m *model) viewUsage(w int) string {
+	var parts []string
+	if m.cfg.amp {
+		parts = append(parts, m.viewCredits(w))
+	}
+	for _, s := range m.subs {
+		parts = append(parts, viewSub(s, w))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// viewSub shows a subscription's rate limit windows, one per line.
+func viewSub(s SubUsage, w int) string {
+	var b strings.Builder
+	name := s.Name
+	if s.Plan != "" {
+		name += " · " + strings.ToUpper(s.Plan[:1]) + s.Plan[1:]
+	}
+	b.WriteString(bold.Render(name))
+	for _, l := range s.Windows {
+		style := lipgloss.NewStyle()
+		switch {
+		case l.Percent >= 90:
+			style = errText
+		case l.Percent >= 75:
+			style = stateStyle["blocked"]
+		}
+		resets := ""
+		if !l.ResetsAt.IsZero() {
+			resets = "resets in " + until(l.ResetsAt)
+		}
+		fmt.Fprintf(&b, "\n  %-13s %s %s  %s", l.Label, style.Render(meter(l.Percent, 10)), style.Render(fmt.Sprintf("%3.0f%%", l.Percent)), dim.Render(resets))
+	}
+	if s.Err != nil {
+		b.WriteString("\n" + errText.Render(truncate("  "+s.Err.Error(), w)))
+	} else if len(s.Windows) == 0 {
+		b.WriteString("\n" + dim.Render("  no limits reported"))
+	}
+	return b.String()
+}
+
+// meter draws percent of width cells as a bar.
+func meter(percent float64, width int) string {
+	n := int(percent/100*float64(width) + 0.5)
+	n = max(0, min(width, n))
+	return strings.Repeat("█", n) + strings.Repeat("░", width-n)
+}
+
+// until is how long until t, such as "4h12m" or "2d5h".
+func until(t time.Time) string {
+	d := time.Until(t).Round(time.Minute)
+	switch {
+	case d <= 0:
+		return "now"
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd%dh", int(d.Hours())/24, int(d.Hours())%24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	return fmt.Sprintf("%dm", int(d.Minutes()))
+}
+
 func (m *model) viewCredits(w int) string {
 	if m.usage.FetchedAt.IsZero() {
 		if m.usageErr != nil {
-			return errText.Render(truncate(m.usageErr.Error(), w))
+			return bold.Render("Amp") + "\n" + errText.Render(truncate(m.usageErr.Error(), w))
 		}
-		return dim.Render("Loading `amp usage`…")
+		return bold.Render("Amp") + "\n" + dim.Render("Loading `amp usage`…")
 	}
 	u := m.usage
 	var b strings.Builder
-	credits := firstNonEmpty(u.Credits, "credits unknown")
+	credits := "Amp · " + firstNonEmpty(u.Credits, "credits unknown")
 	if m.cfg.lowCredits > 0 && u.CreditsUSD >= 0 && u.CreditsUSD < m.cfg.lowCredits {
 		credits = errText.Render(credits + "  LOW")
 	} else {

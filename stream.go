@@ -66,12 +66,26 @@ type streamUsage struct {
 	Low        bool    `json:"low"`
 }
 
+type streamSub struct {
+	Name    string         `json:"name"` // Claude Code or Codex
+	Plan    string         `json:"plan,omitempty"`
+	Windows []streamWindow `json:"windows"`
+	Error   string         `json:"error,omitempty"`
+}
+
+type streamWindow struct {
+	Label    string    `json:"label"` // 5-hour, weekly, weekly Opus…
+	Percent  float64   `json:"percent"`
+	ResetsAt time.Time `json:"resets_at,omitzero"`
+}
+
 type streamSnapshot struct {
 	Type    string            `json:"type"` // "snapshot"
 	Agents  []streamAgent     `json:"agents"`
 	Remote  []streamRemote    `json:"remote"`
 	Desktop []streamDesktop   `json:"desktop"`
-	Usage   *streamUsage      `json:"usage,omitempty"`
+	Usage   *streamUsage      `json:"usage,omitempty"` // Amp, only when amp is installed
+	Subs    []streamSub       `json:"subscriptions"`
 	Errors  map[string]string `json:"errors,omitempty"`
 }
 
@@ -168,7 +182,7 @@ func (s *streamModel) command(c commandMsg) tea.Cmd {
 }
 
 func (s *streamModel) snapshot() streamSnapshot {
-	snap := streamSnapshot{Type: "snapshot", Agents: []streamAgent{}, Remote: []streamRemote{}, Desktop: []streamDesktop{}, Errors: map[string]string{}}
+	snap := streamSnapshot{Type: "snapshot", Agents: []streamAgent{}, Remote: []streamRemote{}, Desktop: []streamDesktop{}, Subs: []streamSub{}, Errors: map[string]string{}}
 	for _, p := range s.agents() {
 		state := paneState(p)
 		if state == "runner" {
@@ -199,6 +213,16 @@ func (s *streamModel) snapshot() streamSnapshot {
 		}
 		su.Low = s.cfg.lowCredits > 0 && u.CreditsUSD >= 0 && u.CreditsUSD < s.cfg.lowCredits
 		snap.Usage = su
+	}
+	for _, sub := range s.subs {
+		ss := streamSub{Name: sub.Name, Plan: sub.Plan, Windows: []streamWindow{}}
+		for _, w := range sub.Windows {
+			ss.Windows = append(ss.Windows, streamWindow{w.Label, w.Percent, w.ResetsAt})
+		}
+		if sub.Err != nil {
+			ss.Error = sub.Err.Error()
+		}
+		snap.Subs = append(snap.Subs, ss)
 	}
 	for name, err := range map[string]error{"rex": s.rexErr, "usage": s.usageErr, "bridge": s.remoteErr, "desktop": s.desktopErr} {
 		if err != nil {

@@ -62,12 +62,29 @@ struct Usage: Decodable, Hashable {
     let low: Bool
 }
 
+/// A rate limit window of a Claude or ChatGPT subscription.
+struct LimitWindow: Decodable, Hashable {
+    let label: String
+    let percent: Double
+    let resets_at: Date?
+}
+
+/// Claude Code's or Codex's subscription limits.
+struct Subscription: Decodable, Hashable, Identifiable {
+    let name: String
+    let plan: String?
+    let windows: [LimitWindow]
+    let error: String?
+    var id: String { name }
+}
+
 private struct Line: Decodable {
     let type: String
     let agents: [Agent]?
     let remote: [RemoteThread]?
     let desktop: [DesktopSession]?
     let usage: Usage?
+    let subscriptions: [Subscription]?
     let errors: [String: String]?
     let message: String?
 }
@@ -146,6 +163,7 @@ final class NotchModel: ObservableObject {
     @Published var remote: [RemoteThread] = []
     @Published var desktop: [DesktopSession] = []
     @Published var usage: Usage?
+    @Published var subscriptions: [Subscription] = []
     @Published var errors: [String: String] = [:]
     @Published var status: String?
     @Published var hovering = false
@@ -194,6 +212,7 @@ final class NotchModel: ObservableObject {
             remote = line.remote ?? []
             desktop = newDesktop
             usage = line.usage ?? usage
+            subscriptions = line.subscriptions ?? subscriptions
             errors = line.errors ?? [:]
             loaded = true
         case "status":

@@ -1,4 +1,4 @@
-// amp-rex-hud is a terminal HUD for Amp usage and the coding agents (Amp,
+// amp-rex-hud is a terminal HUD for Amp, Claude, and Codex usage and the coding agents (Amp,
 // Claude Code, Codex) running in Rex panes and in the Claude and ChatGPT
 // desktop apps. Run it in a Rex split; see init.lua for a toggle key.
 package main
@@ -23,11 +23,12 @@ type config struct {
 	notify      bool
 	client      string
 	stream      bool // -json: stdout carries JSON lines only
+	amp         bool // the amp CLI is installed; without it the HUD hides Amp usage, threads, and the bridge
 }
 
 func main() {
 	var cfg config
-	flag.DurationVar(&cfg.usageEvery, "usage-every", 3*time.Minute, "how often to run `amp usage` (Amp allows 60 usage lookups an hour)")
+	flag.DurationVar(&cfg.usageEvery, "usage-every", 3*time.Minute, "how often to check Amp, Claude, and Codex usage (Amp allows 60 usage lookups an hour)")
 	flag.DurationVar(&cfg.threadEvery, "threads-every", 30*time.Second, "how often to list Amp threads")
 	flag.Float64Var(&cfg.lowCredits, "low", 2, "alert when credits fall below this many dollars (0 turns it off)")
 	flag.BoolVar(&cfg.notify, "notify", true, "send a macOS notification when an agent finishes or needs you")
@@ -43,6 +44,8 @@ func main() {
 		os.Getenv("PATH"), home + "/.local/bin", home + "/.amp/bin", os.Getenv("REX_BIN_DIR"), "/opt/homebrew/bin",
 		home + "/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS",
 	}, ":"))
+	_, err := exec.LookPath("amp")
+	cfg.amp = err == nil
 
 	if *asJSON {
 		if err := runStream(cfg); err != nil {
@@ -55,9 +58,12 @@ func main() {
 	if *once {
 		ctx := context.Background()
 		m.rex, m.rexErr = fetchRex(ctx, discoverHosts(ctx))
-		m.usage, m.usageErr = fetchUsage(ctx)
-		m.threads, m.threadsErr = fetchThreads(ctx, 15)
-		m.remote, m.remoteErr = fetchBridge(ctx)
+		if cfg.amp {
+			m.usage, m.usageErr = fetchUsage(ctx)
+			m.threads, m.threadsErr = fetchThreads(ctx, 15)
+			m.remote, m.remoteErr = fetchBridge(ctx)
+		}
+		m.subs = fetchSubs(ctx)
 		m.desktop, m.desktopErr = fetchDesktop(ctx)
 		m.width, m.height = 80, 60
 		fmt.Println(m.View())
@@ -79,6 +85,7 @@ type (
 		u   Usage
 		err error
 	}
+	subsMsg   []SubUsage
 	bridgeMsg struct {
 		ts  []RemoteThread
 		err error
@@ -105,6 +112,7 @@ type model struct {
 	rexErr     error
 	usage      Usage
 	usageErr   error
+	subs       []SubUsage
 	threads    []Thread
 	threadsErr error
 	remote     []RemoteThread
@@ -162,9 +170,14 @@ func (m *model) loadRex() tea.Cmd {
 	}
 }
 
+// loadUsage checks Amp's credits and the Claude and Codex subscriptions.
 func (m *model) loadUsage() tea.Cmd {
 	m.lastUsage = time.Now()
-	return func() tea.Msg { u, err := fetchUsage(m.ctx); return usageMsg{u, err} }
+	subs := func() tea.Msg { return subsMsg(fetchSubs(m.ctx)) }
+	if !m.cfg.amp {
+		return subs
+	}
+	return tea.Batch(subs, func() tea.Msg { u, err := fetchUsage(m.ctx); return usageMsg{u, err} })
 }
 
 func (m *model) loadDesktop() tea.Cmd {
@@ -195,6 +208,9 @@ func (m *model) alertDesktop(cur []DesktopSession) {
 }
 
 func (m *model) loadBridge() tea.Cmd {
+	if !m.cfg.amp {
+		return nil
+	}
 	return func() tea.Msg { ts, err := fetchBridge(m.ctx); return bridgeMsg{ts, err} }
 }
 
@@ -246,6 +262,9 @@ func (m *model) alertRemote(cur []RemoteThread) {
 }
 
 func (m *model) loadThreads() tea.Cmd {
+	if !m.cfg.amp {
+		return nil
+	}
 	m.lastThreads = time.Now()
 	return func() tea.Msg { ts, err := fetchThreads(m.ctx, 15); return threadsMsg{ts, err} }
 }
@@ -363,6 +382,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.usage = msg.u
 			m.alertLowCredits()
+		}
+
+	case subsMsg:
+		if m.status == "Refreshing…" && !m.cfg.amp {
+			m.status = ""
+		}
+		// Keep the last numbers a failed check had, next to its error.
+		prev := map[string]SubUsage{}
+		for _, s := range m.subs {
+			prev[s.Name] = s
+		}
+		m.subs = msg
+		for i, s := range m.subs {
+			if s.Err != nil && s.Windows == nil {
+				m.subs[i].Windows = prev[s.Name].Windows
+			}
 		}
 
 	case threadsMsg:
