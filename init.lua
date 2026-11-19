@@ -8,7 +8,7 @@ rex.action{
   name     = "amp_hud",
   title    = "Toggle Amp HUD",
   category = "Amp",
-  keywords = "amp usage credits agents hud",
+  keywords = "amp claude codex usage credits agents hud",
   run      = function(ctx, args)
     local blocks, err = rex.session.list_blocks{}
     if err ~= nil then error(err, 0) end

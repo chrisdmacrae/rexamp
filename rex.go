@@ -5,8 +5,8 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -84,15 +84,36 @@ type Pane struct {
 	WindowID, WindowLabel   string
 	BlockID, Label          string
 	Program                 string // foreground process name
+	Agent                   string // amp, claude, codex, or "" for any other program
 	Cwd                     string
 	Title                   string
 	State                   string // program status: idle, working, done, blocked, error, or ""
 	Kind                    string // with blocked: permission, question, auth
 	Msg                     string
+	Since                   time.Time // when State last changed
 	Ports                   []int
 }
 
-func (p Pane) IsAmp() bool { return p.Program == "amp" }
+// IsAgent reports whether a coding agent runs in the pane, whether Amp or
+// Claude Code or Codex started straight from the shell.
+func (p Pane) IsAgent() bool { return p.Agent != "" }
+
+// agentOf names the agent a process is from its name, argv0, and paths. The
+// native Claude Code binary is named after its version, such as 2.1.328, so
+// its name alone doesn't tell.
+func agentOf(names ...string) string {
+	for _, n := range names {
+		switch filepath.Base(n) {
+		case "amp":
+			return "amp"
+		case "claude":
+			return "claude"
+		case "codex":
+			return "codex"
+		}
+	}
+	return ""
+}
 
 type Session struct {
 	Host      string
@@ -105,7 +126,7 @@ type Session struct {
 type RexSnapshot struct {
 	Hosts    []Host // with Err set on the hosts that failed this time
 	Sessions []Session
-	Panes    []Pane // terminal panes, Amp agents first
+	Panes    []Pane // terminal panes, agents first
 	At       time.Time
 }
 
@@ -173,14 +194,17 @@ func fetchRex(ctx context.Context, hosts []Host) (RexSnapshot, error) {
 	}
 	sort.SliceStable(snap.Panes, func(i, j int) bool {
 		a, b := snap.Panes[i], snap.Panes[j]
-		if a.IsAmp() != b.IsAmp() {
-			return a.IsAmp()
+		if a.IsAgent() != b.IsAgent() {
+			return a.IsAgent()
 		}
 		if a.Host != b.Host {
 			return a.Host < b.Host
 		}
 		if a.SessionLabel != b.SessionLabel {
 			return a.SessionLabel < b.SessionLabel
+		}
+		if isAmpRunner(a) != isAmpRunner(b) {
+			return isAmpRunner(b) // runners host other threads, so list them last
 		}
 		return a.BlockID < b.BlockID
 	})
@@ -241,7 +265,7 @@ func fetchHost(ctx context.Context, h Host) (RexSnapshot, error) {
 
 	for i := range snap.Sessions {
 		for _, p := range snap.Panes {
-			if p.SessionID == snap.Sessions[i].ID && p.IsAmp() {
+			if p.SessionID == snap.Sessions[i].ID && p.IsAgent() {
 				snap.Sessions[i].Agents++
 			}
 		}
@@ -256,13 +280,17 @@ func inspectPane(ctx context.Context, p *Pane) {
 
 	var proc struct {
 		Foreground *struct {
-			Name string `json:"name"`
-			Cwd  string `json:"cwd"`
+			Name        string `json:"name"`
+			Argv0       string `json:"argv0"`
+			InvokedPath string `json:"invoked_path"`
+			Path        string `json:"path"`
+			Cwd         string `json:"cwd"`
 		} `json:"foreground"`
 	}
 	call(&proc, "process")
-	if proc.Foreground != nil {
-		p.Program, p.Cwd = proc.Foreground.Name, proc.Foreground.Cwd
+	if f := proc.Foreground; f != nil {
+		p.Program, p.Cwd = f.Name, f.Cwd
+		p.Agent = agentOf(f.Name, f.Argv0, f.InvokedPath, f.Path)
 	}
 
 	var title struct {
@@ -273,10 +301,11 @@ func inspectPane(ctx context.Context, p *Pane) {
 
 	var status struct {
 		Records []struct {
-			ID    string `json:"id"`
-			State string `json:"state"`
-			Kind  string `json:"kind"`
-			Msg   string `json:"msg"`
+			ID    string    `json:"id"`
+			State string    `json:"state"`
+			Kind  string    `json:"kind"`
+			Msg   string    `json:"msg"`
+			At    time.Time `json:"updated_at"`
 		} `json:"records"`
 	}
 	call(&status, "program_status")
@@ -285,11 +314,11 @@ func inspectPane(ctx context.Context, p *Pane) {
 	for _, r := range status.Records {
 		if rank := stateRank(r.State); rank > best {
 			best = rank
-			p.State, p.Kind, p.Msg = r.State, r.Kind, r.Msg
+			p.State, p.Kind, p.Msg, p.Since = r.State, r.Kind, r.Msg, r.At
 		}
 	}
 
-	if p.IsAmp() {
+	if p.IsAgent() {
 		var ports struct {
 			Ports []json.RawMessage `json:"ports"`
 		}
@@ -358,16 +387,14 @@ func watchRex(ctx context.Context, server string, changed chan<- struct{}) {
 	}
 }
 
-// focusPane focuses a pane's block and window on its host. When the pane is in
-// another session, it also asks the Rex app to switch to that session, which
-// needs Remote Control turned on in the app and, with several apps connected,
-// client. The app only shows panes of hosts it is connected to.
+// focusPane focuses a pane's block on its host and asks the Rex app to show
+// its session and tab. The app picks the tab it shows itself, even within the
+// HUD's own session, so focusing the block alone leaves the tab unchanged.
+// Selecting needs Remote Control turned on in the app and, with several apps
+// connected, client. The app only shows panes of hosts it is connected to.
 func focusPane(ctx context.Context, p Pane, client string) error {
 	if _, err := run(ctx, 10*time.Second, "rex", rexArgs(p.Server, "focus", "-s", p.SessionID, p.BlockID)...); err != nil {
 		return err
-	}
-	if p.Server == "" && p.SessionID == os.Getenv("REX_SESSION") {
-		return nil
 	}
 	args := []string{"do", "session.select", "session_id=" + p.SessionID, "window_id=" + p.WindowID}
 	if client != "" {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -25,8 +26,9 @@ var (
 		"blocked": lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true),
 		"error":   lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
 		"idle":    dim,
+		"runner":  dim,
 	}
-	stateIcon = map[string]string{"working": "●", "done": "✓", "blocked": "◆", "error": "✗", "idle": "○", "": "·"}
+	stateIcon = map[string]string{"working": "●", "done": "✓", "blocked": "◆", "error": "✗", "idle": "○", "runner": "◇", "": "·"}
 )
 
 func (m *model) View() string {
@@ -42,18 +44,32 @@ func (m *model) View() string {
 		return panel.Width(inner + 2).Render(heading.Render(title) + "\n" + body)
 	}
 
+	credits := box("Amp credits", m.viewCredits(inner))
 	parts := []string{
-		box("Amp credits", m.viewCredits(inner)),
+		credits,
 		box(fmt.Sprintf("Agents in Rex (%d)", len(m.agents())), m.viewAgents(inner)),
 		box("Agents outside Rex", m.viewRemote(inner)),
 		box("Threads", m.viewThreads(inner)),
 		box(fmt.Sprintf("Rex hosts (%d)", len(m.rex.Hosts)), m.viewSessions(inner)),
 	}
-	help := dim.Render("j/k select · enter show pane · r refresh · q quit")
+	help := dim.Render("j/k or click select · enter or double-click show pane · r refresh · q quit")
 	if m.status != "" {
 		help = m.status
 	}
-	return strings.Join(parts, "\n") + "\n" + truncate(help, w)
+	out := strings.Join(parts, "\n") + "\n" + truncate(help, w)
+
+	// Map screen lines to agents for mouse clicks. The agents box starts
+	// after the credits box, its top border, and its heading, and a view
+	// taller than the terminal loses its top lines.
+	top := lipgloss.Height(credits) + 2
+	if over := lipgloss.Height(out) - m.height; m.height > 0 && over > 0 {
+		top -= over
+	}
+	m.agentAt = map[int]int{}
+	for line, i := range m.agentLines {
+		m.agentAt[top+line] = i
+	}
+	return out
 }
 
 func (m *model) viewCredits(w int) string {
@@ -102,6 +118,9 @@ func (m *model) viewCredits(w int) string {
 	return b.String()
 }
 
+// viewAgents lists agents one per line under a "host › session" heading: what
+// each is doing, then its directory, state, and how long it has been in it.
+// The selected agent also gets a line with its tab, pane, and ports.
 func (m *model) viewAgents(w int) string {
 	if m.rex.At.IsZero() {
 		if m.rexErr != nil {
@@ -111,27 +130,142 @@ func (m *model) viewAgents(w int) string {
 	}
 	agents := m.agents()
 	if len(agents) == 0 {
-		return dim.Render("No panes are running amp.")
+		return dim.Render("No panes are running an agent.")
 	}
-	var lines []string
+	// Line the directory and state columns up across rows.
+	var dirW, stateW int
+	for _, p := range agents {
+		dirW = max(dirW, min(16, lipgloss.Width(shortPath(p.Cwd))))
+		stateW = max(stateW, lipgloss.Width(paneStateText(p)))
+	}
+	lines := []string{agentSummary(agents)}
+	m.agentLines = map[int]int{}
+	group := ""
 	for i, p := range agents {
-		st := stateStyle[p.State]
-		head := fmt.Sprintf("%s %-7s %s", stateIcon[p.State], firstNonEmpty(p.State, "-"), paneName(p))
-		line := st.Render(truncate(head, w))
-		detail := firstNonEmpty(p.Msg, m.threadTitleFor(p), shortPath(p.Cwd))
-		if p.State == "blocked" && p.Kind != "" {
-			detail = p.Kind + ": " + detail
+		if g := shortHost(p.Host) + " › " + p.SessionLabel; g != group {
+			group = g
+			lines = append(lines, bold.Render(truncate(g, w)))
 		}
-		if len(p.Ports) > 0 {
-			detail += fmt.Sprintf("  ports %v", p.Ports)
-		}
-		line += "\n" + dim.Render(truncate("    "+detail, w))
+		m.agentLines[len(lines)] = i
+		lines = append(lines, m.agentRow(p, i == m.cursor, w, dirW, stateW))
 		if i == m.cursor {
-			line = sel.Width(w).Render(line)
+			if d := paneDetail(p); d != "" {
+				m.agentLines[len(lines)] = i
+				lines = append(lines, dim.Render(truncate("      "+d, w)))
+			}
 		}
-		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// agentSummary counts agents by state, most urgent first.
+func agentSummary(agents []Pane) string {
+	count := map[string]int{}
+	for _, p := range agents {
+		count[paneState(p)]++
+	}
+	var parts []string
+	for _, s := range []string{"blocked", "error", "working", "done", "idle", "runner"} {
+		if n := count[s]; n > 0 {
+			label := s
+			switch {
+			case s == "blocked":
+				label = "need you"
+			case s == "runner" && n > 1:
+				label = "runners"
+			}
+			parts = append(parts, stateStyle[s].Render(fmt.Sprintf("%s %d %s", stateIcon[s], n, label)))
+		}
+	}
+	return strings.Join(parts, dim.Render(" · "))
+}
+
+func (m *model) agentRow(p Pane, selected bool, w, dirW, stateW int) string {
+	state := paneState(p)
+	st := stateStyle[state]
+	cursor := "  "
+	if selected {
+		cursor = lipgloss.NewStyle().Foreground(accent).Render("▌ ")
+	}
+	left := cursor + st.Render(stateIcon[state]) + " " + fmt.Sprintf("%-6s ", p.Agent)
+
+	stateText := paneStateText(p)
+	right := dim.Render(fmt.Sprintf("%-*s", dirW, truncate(shortPath(p.Cwd), dirW))) + "  " +
+		st.Render(fmt.Sprintf("%-*s", stateW, stateText))
+
+	task := m.paneTask(p)
+	switch {
+	case state == "blocked":
+		why := map[string]string{"permission": "needs permission", "question": "has a question", "auth": "needs login"}[p.Kind]
+		why = firstNonEmpty(why, "needs you")
+		if p.Msg != "" {
+			why += ": " + p.Msg
+		}
+		task += st.Render(" · " + why)
+	case state == "error" && p.Msg != "":
+		task += st.Render(" · " + p.Msg)
+	case state == "working" && p.Msg != "" && p.Msg != task:
+		task += dim.Render(" · " + p.Msg)
+	}
+	if selected {
+		task = bold.Render(task)
+	}
+	room := w - lipgloss.Width(left) - lipgloss.Width(right) - 2
+	task = truncate(task, max(8, room))
+	pad := w - lipgloss.Width(left) - lipgloss.Width(task) - lipgloss.Width(right)
+	return left + task + strings.Repeat(" ", max(1, pad)) + right
+}
+
+// paneStateText is the state column: the state and how long ago it began.
+func paneStateText(p Pane) string {
+	state := paneState(p)
+	if state == "runner" {
+		return ""
+	}
+	if state == "blocked" {
+		state = "needs you"
+	}
+	if !p.Since.IsZero() {
+		return state + " " + ago(p.Since)
+	}
+	return state
+}
+
+// paneState is the state to show: an Amp runner hosts threads rather than
+// working itself, and an agent that reports nothing is idle.
+func paneState(p Pane) string {
+	if p.State == "" && isAmpRunner(p) {
+		return "runner"
+	}
+	return firstNonEmpty(p.State, "idle")
+}
+
+func isAmpRunner(p Pane) bool { return strings.Contains(p.Title, " - amp runner") }
+
+// paneDetail names the pane's tab and pane when they have been given labels,
+// and lists the ports its agent listens on.
+func paneDetail(p Pane) string {
+	var parts []string
+	if p.WindowLabel != "" && !defaultWindowRe.MatchString(p.WindowLabel) {
+		parts = append(parts, "tab "+p.WindowLabel)
+	}
+	if p.Label != "" && p.Label != "shell" {
+		parts = append(parts, "pane "+p.Label)
+	}
+	if p.Cwd != "" {
+		parts = append(parts, strings.Replace(p.Cwd, homeDir, "~", 1))
+	}
+	if len(p.Ports) > 0 {
+		parts = append(parts, fmt.Sprintf("ports %v", p.Ports))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// shortHost drops the domain from a host label such as
+// "mac-mini.tail1234.ts.net".
+func shortHost(h string) string {
+	name, _, _ := strings.Cut(h, ".")
+	return name
 }
 
 // viewRemote shows threads running on orbs, other runners, or Amp's web and
@@ -216,7 +350,7 @@ func (m *model) viewSessions(w int) string {
 		for _, s := range m.rex.Sessions {
 			if s.Host == h.Label {
 				n++
-				lines = append(lines, truncate(fmt.Sprintf("  %-18s %d tabs · %d panes · %d amp", s.Label, s.Windows, s.Panes, s.Agents), w))
+				lines = append(lines, truncate(fmt.Sprintf("  %-18s %d tabs · %d panes · %d agents", s.Label, s.Windows, s.Panes, s.Agents), w))
 			}
 		}
 		if n == 0 {
@@ -229,6 +363,10 @@ func (m *model) viewSessions(w int) string {
 var (
 	threadIDRe = regexp.MustCompile(`T-[0-9a-f-]{36}`)
 	spinnerRe  = regexp.MustCompile(`^[\x{2800}-\x{28FF}]\s*`)
+	// Rex names a window "Window" and the start of its ID until it is labeled.
+	defaultWindowRe = regexp.MustCompile(`^Window [0-9a-f]{8}$`)
+	runnerThreadsRe = regexp.MustCompile(`\((\d+ threads?)\)`)
+	homeDir, _      = os.UserHomeDir()
 )
 
 // threadTitleFor finds the Amp thread a pane is showing. Amp puts the thread
@@ -236,14 +374,44 @@ var (
 func (m *model) threadTitleFor(p Pane) string {
 	t := spinnerRe.ReplaceAllString(p.Title, "")
 	name, _, ok := strings.Cut(t, " - amp")
-	if !ok || name == "" || name == "amp" {
+	if !ok || name == "" || name == "amp" || isAmpRunner(p) {
 		return ""
 	}
 	return name
 }
 
+// paneTask is what the pane's agent is working on. Claude Code and Codex put
+// their task in the terminal title, Codex followed by " | <dir>", which the
+// row shows anyway.
+func (m *model) paneTask(p Pane) string {
+	if isAmpRunner(p) {
+		if n := runnerThreadsRe.FindStringSubmatch(p.Title); n != nil {
+			return "runner for " + n[1]
+		}
+		return "runner"
+	}
+	if p.Agent == "amp" {
+		return firstNonEmpty(m.threadTitleFor(p), "new thread")
+	}
+	t := spinnerRe.ReplaceAllString(p.Title, "")
+	if dir := shortPath(p.Cwd); dir != "" {
+		t = strings.TrimSuffix(t, " | "+dir)
+	}
+	return firstNonEmpty(t, "new session")
+}
+
+func agentName(agent string) string {
+	switch agent {
+	case "claude":
+		return "Claude Code"
+	case "codex":
+		return "Codex"
+	}
+	return "Amp"
+}
+
 func paneName(p Pane) string {
-	return p.Host + " › " + p.SessionLabel + " › " + firstNonEmpty(p.WindowLabel, "tab") + " › " + firstNonEmpty(p.Label, shortPath(p.Cwd))
+	return shortHost(p.Host) + " › " + p.SessionLabel + " › " + firstNonEmpty(p.WindowLabel, "tab") + " › " + firstNonEmpty(p.Label, shortPath(p.Cwd))
 }
 
 func shortPath(p string) string {

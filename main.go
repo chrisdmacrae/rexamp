@@ -1,5 +1,5 @@
-// amp-rex-hud is a terminal HUD for Amp usage and the Amp agents running in
-// Rex panes. Run it in a Rex split; see init.lua for a toggle key.
+// amp-rex-hud is a terminal HUD for Amp usage and the coding agents (Amp,
+// Claude Code, Codex) running in Rex panes. Run it in a Rex split; see init.lua for a toggle key.
 package main
 
 import (
@@ -51,7 +51,7 @@ func main() {
 		fmt.Println(m.View())
 		return
 	}
-	if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
+	if _, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -105,6 +105,10 @@ type model struct {
 	hosts       []Host
 	hostsAt     time.Time
 	watching    map[string]bool // servers with a running watchRex
+	agentLines  map[int]int     // agents box body line -> agent index, set by View
+	agentAt     map[int]int     // screen line -> agent index, set by View
+	lastClick   time.Time
+	lastClickAt int // agent index of lastClick
 }
 
 func newModel(cfg config) *model {
@@ -204,11 +208,22 @@ func (m *model) loadThreads() tea.Cmd {
 func (m *model) agents() []Pane {
 	var out []Pane
 	for _, p := range m.rex.Panes {
-		if p.IsAmp() {
+		if p.IsAgent() {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+// focus shows agent i's pane in the Rex app.
+func (m *model) focus(i int) tea.Cmd {
+	agents := m.agents()
+	if i >= len(agents) {
+		return nil
+	}
+	p := agents[i]
+	m.status = "Showing " + paneName(p) + "…"
+	return func() tea.Msg { return focusedMsg{focusPane(m.ctx, p, m.cfg.client)} }
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -230,15 +245,32 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor--
 			}
 		case "enter", "f":
-			if m.cursor < len(agents) {
-				p := agents[m.cursor]
-				m.status = "Showing " + paneName(p) + "…"
-				return m, func() tea.Msg { return focusedMsg{focusPane(m.ctx, p, m.cfg.client)} }
-			}
+			return m, m.focus(m.cursor)
 		case "r":
 			m.status = "Refreshing…"
 			m.rexLoading = true
 			return m, tea.Batch(m.loadRex(), m.loadUsage(), m.loadThreads())
+		}
+
+	case tea.MouseMsg:
+		n := len(m.agents())
+		switch {
+		case msg.Action != tea.MouseActionPress:
+		case msg.Button == tea.MouseButtonWheelDown:
+			m.cursor = max(0, min(n-1, m.cursor+1))
+		case msg.Button == tea.MouseButtonWheelUp:
+			m.cursor = max(0, m.cursor-1)
+		case msg.Button == tea.MouseButtonLeft:
+			i, ok := m.agentAt[msg.Y]
+			if !ok || i >= n {
+				break
+			}
+			double := i == m.lastClickAt && time.Since(m.lastClick) < 400*time.Millisecond
+			m.cursor, m.lastClickAt, m.lastClick = i, i, time.Now()
+			if double {
+				m.lastClick = time.Time{} // a third click starts over
+				return m, m.focus(i)
+			}
 		}
 
 	case focusedMsg:
@@ -319,7 +351,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// alertTransitions notifies when an Amp agent finishes or starts waiting on you.
+// alertTransitions notifies when an agent in a pane finishes or starts waiting on you.
 func (m *model) alertTransitions(old, cur RexSnapshot) {
 	if old.At.IsZero() {
 		return // first snapshot: nothing changed yet
@@ -329,16 +361,17 @@ func (m *model) alertTransitions(old, cur RexSnapshot) {
 		prev[p.BlockID] = p.State
 	}
 	for _, p := range cur.Panes {
-		if !p.IsAmp() || p.State == prev[p.BlockID] {
+		if !p.IsAgent() || p.State == prev[p.BlockID] {
 			continue
 		}
+		name := agentName(p.Agent)
 		switch p.State {
 		case "done":
-			m.notify("Amp finished", paneName(p), p.Msg)
+			m.notify(name+" finished", paneName(p), p.Msg)
 		case "blocked":
-			m.notify("Amp needs you", paneName(p), firstNonEmpty(p.Msg, p.Kind))
+			m.notify(name+" needs you", paneName(p), firstNonEmpty(p.Msg, p.Kind))
 		case "error":
-			m.notify("Amp failed", paneName(p), p.Msg)
+			m.notify(name+" failed", paneName(p), p.Msg)
 		}
 	}
 }
