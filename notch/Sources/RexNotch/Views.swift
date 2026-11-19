@@ -1,22 +1,21 @@
+import AppKit
 import SwiftUI
 
 enum Mode: Equatable {
     case idle // nothing running: the notch alone
-    case compact // agents running: an icon and a count beside the notch
-    case peek // an agent just finished or failed
-    case ask // an agent needs an answer
-    case list // hovering: every agent
+    case compact // agents running: the dinosaur and a count beside the notch
+    case peek // an agent just finished or failed, and notifications are off
+    case ask // an agent needs an answer, and notifications are off
+    case list // clicked open: every agent and usage
 }
 
+/// System colors, so states match the rest of macOS in light and dark mode.
 enum Palette {
-    static let working = Color(red: 0.29, green: 0.62, blue: 1)
-    static let done = Color(red: 0.2, green: 0.82, blue: 0.4)
-    static let blocked = Color(red: 1, green: 0.58, blue: 0.16)
-    static let error = Color(red: 1, green: 0.3, blue: 0.27)
-    static let idle = Color(white: 0.5)
-    static let question = Color(red: 0.13, green: 0.7, blue: 0.85)
-    static let option = Color(red: 0.04, green: 0.11, blue: 0.13)
-    static let optionKey = Color(red: 0.06, green: 0.25, blue: 0.29)
+    static let working = Color(nsColor: .systemBlue)
+    static let done = Color(nsColor: .systemGreen)
+    static let blocked = Color(nsColor: .systemOrange)
+    static let error = Color(nsColor: .systemRed)
+    static let idle = Color(nsColor: .systemGray)
 
     static func state(_ s: String) -> Color {
         switch s {
@@ -27,81 +26,130 @@ enum Palette {
         default: idle
         }
     }
+
+    /// The SF Symbol on a row's state badge.
+    static func symbol(_ s: String) -> String {
+        switch s {
+        case "working": "ellipsis"
+        case "done": "checkmark"
+        case "blocked": "hand.raised.fill"
+        case "error": "xmark"
+        default: "minus"
+        }
+    }
+}
+
+let rexBundle = "com.superlogical.rex"
+
+/// The popover material, kept active. SwiftUI's materials go flat grey in a
+/// window that isn't key, and the notch's panel never is.
+struct PopoverMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .popover
+        v.blendingMode = .behindWindow
+        v.state = .active
+        v.wantsLayer = true
+        v.layer?.cornerRadius = 12
+        v.layer?.cornerCurve = .continuous
+        v.layer?.masksToBounds = true
+        return v
+    }
+
+    func updateNSView(_ v: NSVisualEffectView, context: Context) {}
+}
+
+extension View {
+    /// The look of a menu bar extra's panel: the popover material with a
+    /// hairline edge.
+    func panelStyle() -> some View {
+        // A wash of the window color keeps text readable over dark content
+        // in light mode, as Control Center does.
+        background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(nsColor: .windowBackgroundColor).opacity(0.6)))
+            .background(PopoverMaterial())
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
+    }
 }
 
 struct NotchView: View {
     @EnvironmentObject var model: NotchModel
     @EnvironmentObject var shape: ShapeBox
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     let geometry: NotchGeometry
     let menu: () -> [MenuItem]
 
     static let wing: CGFloat = 44
 
     var mode: Mode {
-        if model.hovering { return .list }
-        if model.asking != nil { return .ask }
+        if model.expanded { return .list }
+        if !model.notifies, model.asking != nil { return .ask }
         if model.peek != nil || model.peekDesktop != nil { return .peek }
-        if !model.agents.isEmpty || !model.remote.isEmpty || !model.desktop.isEmpty { return .compact }
-        return .idle
+        if model.agents.isEmpty && model.remote.isEmpty && model.desktop.isEmpty { return .idle }
+        return .compact
     }
 
-    var width: CGFloat {
-        switch mode {
-        case .idle: geometry.width
-        case .compact: geometry.width + 2 * Self.wing
-        case .peek: max(geometry.width + 2 * Self.wing, 460)
-        case .ask, .list: 500
-        }
+    /// The strip shows its wings when anything runs, and when hovered so
+    /// it's clear it can be clicked; hovering also widens it a little.
+    var wings: Bool { mode != .idle || model.hovering || model.expanded }
+
+    var stripWidth: CGFloat {
+        wings ? geometry.width + 2 * (Self.wing + (model.hovering ? 6 : 0)) : geometry.width
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if mode != .idle { wings }
-            Group {
-                switch mode {
-                case .idle, .compact: EmptyView()
-                case .peek:
-                    if let a = model.peek { PeekRow(agent: a) } else if let d = model.peekDesktop { DesktopPeekRow(session: d) }
-                case .ask: model.asking.map { AskCard(agent: $0) }
-                case .list: AgentList()
+        VStack(spacing: 6) {
+            strip
+            if mode == .peek || mode == .ask || mode == .list {
+                Group {
+                    switch mode {
+                    case .peek:
+                        if let a = model.peek { AgentRow(agent: a, now: .now) } else if let d = model.peekDesktop { DesktopRow(session: d, now: .now) }
+                    case .ask: model.asking.map { AskCard(agent: $0) }
+                    default: AgentList()
+                    }
                 }
+                .padding(mode == .list ? 0 : 6)
+                .frame(width: mode == .peek ? 420 : 480)
+                // The panel never activates the app, which would draw
+                // accent colors grey, as in an inactive window.
+                .environment(\.controlActiveState, .key)
+                .panelStyle()
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -6)))
             }
-            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
         }
-        .frame(width: width, alignment: .top)
-        .frame(minHeight: geometry.height, alignment: .top)
-        .background(alignment: .top) {
-            NotchShape(bottomRadius: mode == .idle || mode == .compact ? 10 : 22)
-                .fill(.black)
-                .shadow(color: .black.opacity(mode == .idle || mode == .compact ? 0 : 0.45), radius: 14, y: 6)
-        }
-        .opacity(mode == .idle && !geometry.hasNotch ? 0 : 1)
         .background(GeometryReader { g in
             Color.clear.onAppear { shape.size = g.size }.onChange(of: g.size) { _, s in shape.size = s }
         })
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: mode)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: model.hovering)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.asking)
+    }
+
+    /// The black strip that extends the notch: the dinosaur left of it and
+    /// the count right of it. Clicking it opens the list.
+    var strip: some View {
+        HStack(spacing: 0) {
+            if wings {
+                let top = model.topState
+                DinoIcon(color: Palette.state(top), working: top == "working" && !reduceMotion)
+                    .frame(width: Self.wing)
+                Spacer(minLength: geometry.width)
+                Text("\(max(model.activeCount, model.agents.count + model.desktop.count))")
+                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.8))
+                    .frame(minWidth: 18, minHeight: 18)
+                    .background(Capsule().fill(.white.opacity(0.15)))
+                    .frame(width: Self.wing)
+            }
+        }
+        .frame(width: stripWidth, height: geometry.height)
+        .background(NotchShape(bottomRadius: 10).fill(.black))
+        .opacity(!wings && !geometry.hasNotch ? 0 : 1)
+        .contentShape(Rectangle())
+        .onTapGesture { model.expanded.toggle() }
         .contextMenu {
             ForEach(menu()) { item in Button(item.title, action: item.action) }
         }
-        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: mode)
-        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: model.asking)
-        .preferredColorScheme(.dark)
-    }
-
-    /// The icon left of the notch and the count right of it.
-    var wings: some View {
-        let top = model.topState
-        return HStack(spacing: 0) {
-            PixelIcon(color: Palette.state(top), working: top == "working")
-                .frame(width: Self.wing)
-            Spacer(minLength: geometry.width)
-            Text("\(max(model.activeCount, model.agents.count + model.desktop.count))")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.75))
-                .frame(minWidth: 18, minHeight: 18)
-                .background(RoundedRectangle(cornerRadius: 5).fill(.white.opacity(0.12)))
-                .frame(width: Self.wing)
-        }
-        .frame(height: geometry.height)
     }
 }
 
@@ -131,49 +179,6 @@ struct NotchShape: Shape {
     }
 }
 
-/// A little pixel creature, tinted by state; it hops while its agent works.
-struct PixelIcon: View {
-    var color: Color
-    var working = false
-    static let rows = [
-        "..X...X..",
-        ".XXXXXXX.",
-        "XX.XXX.XX",
-        "XXXXXXXXX",
-        ".X.X.X.X.",
-    ]
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 0.12, paused: !working)) { tl in
-            let hop = working ? Int(tl.date.timeIntervalSinceReferenceDate * 4) % 2 : 0
-            Canvas { ctx, size in
-                let px: CGFloat = 2
-                let w = CGFloat(Self.rows[0].count) * px, h = CGFloat(Self.rows.count) * px
-                let ox = (size.width - w) / 2, oy = (size.height - h) / 2 - CGFloat(hop)
-                for (y, row) in Self.rows.enumerated() {
-                    for (x, c) in row.enumerated() where c == "X" {
-                        ctx.fill(Path(CGRect(x: ox + CGFloat(x) * px, y: oy + CGFloat(y) * px, width: px, height: px)), with: .color(color))
-                    }
-                }
-            }
-        }
-        .frame(width: 22, height: 16)
-    }
-}
-
-struct Tag: View {
-    let text: String
-    var body: some View {
-        Text(text)
-            .font(.system(size: 11.5, weight: .medium))
-            .foregroundStyle(.white.opacity(0.55))
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.09)))
-    }
-}
-
 func ago(_ d: Date?, now: Date = .now) -> String {
     guard let d else { return "" }
     let s = now.timeIntervalSince(d)
@@ -185,29 +190,153 @@ func ago(_ d: Date?, now: Date = .now) -> String {
     }
 }
 
-// MARK: Peek
+/// How long until d, such as "3h 12m" or "1d 22h".
+func until(_ d: Date, now: Date = .now) -> String {
+    let m = Int(d.timeIntervalSince(now) / 60)
+    switch m {
+    case ..<1: return "now"
+    case ..<60: return "\(m)m"
+    case ..<(24 * 60): return "\(m / 60)h \(m % 60)m"
+    default: return "\(m / 1440)d \(m % 1440 / 60)h"
+    }
+}
 
-struct PeekRow: View {
-    @EnvironmentObject var model: NotchModel
-    let agent: Agent
+// MARK: Rows
+
+/// An app's icon with a badge for its agent's state, like a notification's.
+struct AppIcon: View {
+    let bundle: String?
+    var symbol = "terminal"
+    let state: String
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+
+    @MainActor static var cache: [String: NSImage] = [:]
+
+    @MainActor static func icon(_ bundle: String) -> NSImage? {
+        if let i = cache[bundle] { return i }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) else { return nil }
+        let i = NSWorkspace.shared.icon(forFile: url.path)
+        cache[bundle] = i
+        return i
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            PixelIcon(color: Palette.state(agent.state))
-            Text(agent.task)
-                .font(.system(size: 14, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.75))
-                .lineLimit(1)
-            Spacer()
-            Text(agent.state == "done" ? "Done" : "Failed")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Palette.state(agent.state))
+        ZStack(alignment: .bottomTrailing) {
+            Group {
+                if let b = bundle, let i = Self.icon(b) {
+                    Image(nsImage: i).resizable().interpolation(.high)
+                } else {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.quaternary)
+                        .overlay(Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary))
+                        .padding(1)
+                }
+            }
+            .frame(width: 30, height: 30)
+            Image(systemName: Palette.symbol(state))
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 14, height: 14)
+                .background(Circle().fill(Palette.state(state)))
+                .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+                .symbolEffect(.pulse, isActive: state == "working" && !reduceMotion)
+                .offset(x: 3, y: 3)
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 4)
-        .padding(.bottom, 14)
-        .contentShape(Rectangle())
-        .onTapGesture { model.focus(agent) }
+        .frame(width: 34, height: 34)
+    }
+}
+
+/// A row like a notification: the app's icon, a title, a secondary line,
+/// what it needs from you if anything, and the time.
+struct ActivityRow: View {
+    let bundle: String?
+    var symbol = "terminal"
+    let state: String
+    let title: String
+    let subtitle: String
+    var detail: String?
+    let time: String
+    var help = ""
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                AppIcon(bundle: bundle, symbol: symbol, state: state)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(title).font(.headline).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(time).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    if let detail {
+                        Text(detail).font(.subheadline).foregroundStyle(Palette.state(state)).lineLimit(1)
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(hover ? 0.07 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(help)
+    }
+}
+
+struct AgentRow: View {
+    @EnvironmentObject var model: NotchModel
+    let agent: Agent
+    let now: Date
+
+    var stateLine: String? {
+        switch agent.state {
+        case "done": return "Finished"
+        case "error": return "Failed" + (agent.msg.map { ": \($0)" } ?? "")
+        case "blocked":
+            let why = ["permission": "Needs permission", "question": "Has a question", "auth": "Needs you to log in"][agent.kind ?? ""] ?? "Needs you"
+            return why
+        default: return nil
+        }
+    }
+
+    var body: some View {
+        ActivityRow(bundle: rexBundle, state: agent.state, title: agent.task, subtitle: "\(agent.name) · \(agent.session)",
+                    detail: stateLine, time: ago(agent.since, now: now), help: agent.cwd) { model.focus(agent) }
+    }
+}
+
+/// An Amp thread outside Rex; clicking opens it on ampcode.com.
+struct RemoteRow: View {
+    @EnvironmentObject var model: NotchModel
+    let thread: RemoteThread
+    let now: Date
+
+    var body: some View {
+        ActivityRow(bundle: nil, symbol: "globe", state: thread.state, title: thread.title, subtitle: "Amp · outside Rex",
+                    time: ago(thread.updated, now: now)) { model.open(thread) }
+    }
+}
+
+/// A Claude or ChatGPT desktop session; clicking brings that app forward.
+struct DesktopRow: View {
+    @EnvironmentObject var model: NotchModel
+    let session: DesktopSession
+    let now: Date
+
+    var stateLine: String? {
+        switch session.state {
+        case "done": return "Finished"
+        case "blocked": return session.kind == "permission" ? "Needs permission" : "Has a question"
+        default: return nil
+        }
+    }
+
+    var body: some View {
+        ActivityRow(bundle: session.bundle, state: session.state, title: session.task, subtitle: "\(session.name) · Desktop",
+                    detail: stateLine, time: ago(session.since, now: now), help: session.cwd) { model.open(session) }
     }
 }
 
@@ -218,278 +347,135 @@ struct AgentList: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { tl in
-            VStack(alignment: .leading, spacing: 2) {
-                header
+            VStack(alignment: .leading, spacing: 8) {
                 if let a = model.asking {
-                    AskCard(agent: a).padding(.horizontal, -18).padding(.bottom, 4)
+                    AskCard(agent: a)
+                    Divider()
                 }
-                ForEach(model.items) { item in
-                    switch item {
-                    case .pane(let a): AgentRow(agent: a, now: tl.date)
-                    case .desktop(let d): DesktopRow(session: d, now: tl.date)
+                VStack(alignment: .leading, spacing: 0) {
+                    sectionTitle("Agents")
+                    ForEach(model.items) { item in
+                        switch item {
+                        case .pane(let a): AgentRow(agent: a, now: tl.date)
+                        case .desktop(let d): DesktopRow(session: d, now: tl.date)
+                        }
                     }
+                    ForEach(model.remote) { t in
+                        RemoteRow(thread: t, now: tl.date)
+                    }
+                    if !model.loaded {
+                        note("Reading Rex…")
+                    } else if model.agents.isEmpty && model.remote.isEmpty && model.desktop.isEmpty {
+                        note("No agents running")
+                    }
+                    if let e = model.errors["rex"] { note(e, color: Palette.error) }
+                    if let s = model.status { note(s, color: Palette.blocked) }
                 }
-                ForEach(model.remote) { t in
-                    RemoteRow(thread: t, now: tl.date)
+                if model.usage != nil || !model.subscriptions.isEmpty {
+                    Divider()
+                    UsageSection(now: tl.date)
                 }
-                if !model.loaded {
-                    note("Reading Rex…")
-                } else if model.agents.isEmpty && model.remote.isEmpty && model.desktop.isEmpty {
-                    note("No agents running")
-                }
-                if let e = model.errors["rex"] { note(e, color: Palette.error) }
-                if let s = model.status { note(s, color: Palette.blocked) }
             }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 14)
+            .padding(10)
         }
     }
 
-    @ViewBuilder var header: some View {
-        if let u = model.usage {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkle").foregroundStyle(Color(red: 0.95, green: 0.45, blue: 0.25))
-                Text(u.credits_usd >= 0 ? String(format: "$%.2f", u.credits_usd) : "credits ?")
-                    .foregroundStyle(u.low ? Palette.error : .white)
-                    .fontWeight(.semibold)
-                Text("left").foregroundStyle(.white.opacity(0.45))
-                if let t = u.today_cost {
-                    Text("|").foregroundStyle(.white.opacity(0.25))
-                    Text("today").fontWeight(.semibold)
-                    Text(t).foregroundStyle(Palette.done)
-                }
-                if let w = u.week_cost {
-                    Text("|").foregroundStyle(.white.opacity(0.25))
-                    Text("7d").fontWeight(.semibold)
-                    Text(w).foregroundStyle(Palette.done)
-                }
-            }
-            .font(.system(size: 12.5, design: .monospaced))
-            .padding(.horizontal, 2)
-            .padding(.bottom, model.subscriptions.isEmpty ? 6 : 2)
-        }
-        ForEach(model.subscriptions) { sub in
-            SubscriptionRow(sub: sub)
-        }
-        if !model.subscriptions.isEmpty { Spacer().frame(height: 4) }
+    func sectionTitle(_ s: String) -> some View {
+        Text(s).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary).padding(.horizontal, 8).padding(.bottom, 4)
     }
 
-    func note(_ s: String, color: Color = .white.opacity(0.45)) -> some View {
-        Text(s).font(.system(size: 12)).foregroundStyle(color).lineLimit(2).padding(.vertical, 6).padding(.horizontal, 2)
+    func note(_ s: String, color: Color = .secondary) -> some View {
+        Text(s).font(.subheadline).foregroundStyle(color).lineLimit(2).padding(.vertical, 4).padding(.horizontal, 8)
     }
 }
 
-/// One line per subscription: each limit window's use, and when it resets.
-struct SubscriptionRow: View {
+// MARK: Usage
+
+/// Amp credits and each subscription's limits, drawn like the Battery menu.
+struct UsageSection: View {
+    @EnvironmentObject var model: NotchModel
+    let now: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Usage").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            if let u = model.usage {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Amp").font(.headline)
+                        Spacer()
+                        Text(u.credits_usd >= 0 ? String(format: "$%.2f left", u.credits_usd) : "Credits unknown")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(u.low ? Palette.error : .primary)
+                    }
+                    let costs = [u.today_cost.map { "Today \($0)" }, u.week_cost.map { "7 days \($0)" }].compactMap { $0 }
+                    if !costs.isEmpty {
+                        Text(costs.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            ForEach(model.subscriptions) { sub in
+                SubscriptionView(sub: sub, now: now)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.bottom, 4)
+    }
+}
+
+struct SubscriptionView: View {
     let sub: Subscription
+    let now: Date
 
     static func color(_ p: Double) -> Color {
-        p >= 90 ? Palette.error : p >= 75 ? Palette.blocked : Palette.done
-    }
-
-    static func short(_ label: String) -> String {
-        ["5-hour": "5h", "weekly": "7d", "weekly Opus": "7d Opus", "weekly Sonnet": "7d Sonnet"][label] ?? label
+        p >= 90 ? Palette.error : p >= 75 ? Palette.blocked : .accentColor
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: sub.name == "Codex" ? "chevron.left.forwardslash.chevron.right" : "asterisk")
-                .foregroundStyle(.white.opacity(0.6))
-                .frame(width: 14)
-            Text(sub.name).fontWeight(.semibold)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(sub.name).font(.headline)
+                if let p = sub.plan, !p.isEmpty {
+                    Text(p.capitalized).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let e = sub.error, !sub.windows.isEmpty {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.blocked).help(e)
+                }
+            }
             if let e = sub.error, sub.windows.isEmpty {
-                Text(e).foregroundStyle(Palette.error).lineLimit(1)
+                Text(e).font(.caption).foregroundStyle(Palette.error).lineLimit(2)
             }
             ForEach(sub.windows, id: \.label) { w in
-                Text("|").foregroundStyle(.white.opacity(0.25))
-                Text(Self.short(w.label)).foregroundStyle(.white.opacity(0.7))
-                Text(String(format: "%.0f%%", w.percent)).foregroundStyle(Self.color(w.percent))
-                if let r = w.resets_at {
-                    Text("↻" + ago(.now, now: r)).foregroundStyle(.white.opacity(0.45))
-                }
-            }
-            if sub.error != nil && !sub.windows.isEmpty {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.error).help(sub.error ?? "")
-            }
-        }
-        .font(.system(size: 12.5, design: .monospaced))
-        .lineLimit(1)
-        .padding(.horizontal, 2)
-    }
-}
-
-struct AgentRow: View {
-    @EnvironmentObject var model: NotchModel
-    let agent: Agent
-    let now: Date
-    @State private var hover = false
-
-    var expanded: Bool { ["done", "blocked", "error"].contains(agent.state) }
-
-    var stateLine: String {
-        switch agent.state {
-        case "done": return "Done — click to jump"
-        case "error": return "Failed" + (agent.msg.map { " — \($0)" } ?? "")
-        case "blocked":
-            let why = ["permission": "needs permission", "question": "has a question", "auth": "needs login"][agent.kind ?? ""] ?? "needs you"
-            return "Waiting — \(agent.name) \(why)"
-        default: return ""
-        }
-    }
-
-    var body: some View {
-        HStack(alignment: expanded ? .top : .center, spacing: 12) {
-            Group {
-                if expanded {
-                    PixelIcon(color: Palette.state(agent.state))
-                } else {
-                    Circle().fill(Palette.state(agent.state)).frame(width: 8, height: 8)
-                        .opacity(agent.state == "working" ? (hover ? 1 : 0.95) : 1)
-                }
-            }
-            .frame(width: 22)
-            .padding(.top, expanded ? 2 : 0)
-            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
-                    Text(agent.task)
-                        .font(.system(size: expanded ? 15 : 14, weight: expanded ? .semibold : .regular))
-                        .foregroundStyle(.white.opacity(expanded ? 1 : 0.8))
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Tag(text: agent.name)
-                    Tag(text: agent.session)
-                    Text(ago(agent.since, now: now))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.45))
-                        .frame(minWidth: 26, alignment: .trailing)
-                }
-                if expanded {
-                    if let m = agent.msg, !m.isEmpty, m != agent.task, agent.state != "error" {
-                        Text(m).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
+                    Text(w.label.prefix(1).uppercased() + w.label.dropFirst())
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(width: 84, alignment: .leading)
+                    // A capsule bar like the Battery menu's; Gauge ignores its tint on macOS.
+                    GeometryReader { g in
+                        Capsule().fill(.quaternary)
+                            .overlay(alignment: .leading) {
+                                Capsule().fill(Self.color(w.percent))
+                                    .frame(width: max(6, g.size.width * min(max(w.percent, 0), 100) / 100))
+                            }
                     }
-                    Text(stateLine).font(.system(size: 12.5)).foregroundStyle(Palette.state(agent.state)).lineLimit(1)
+                    .frame(height: 6)
+                    Text(String(format: "%.0f%%", w.percent))
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 34, alignment: .trailing)
+                    Text(w.resets_at.map { "resets in " + until($0, now: now) } ?? "")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        .frame(width: 96, alignment: .leading)
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, expanded ? 12 : 9)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(expanded ? 0.07 : hover ? 0.05 : 0)))
-        .contentShape(Rectangle())
-        .onHover { hover = $0 }
-        .onTapGesture { model.focus(agent) }
-        .help(agent.cwd)
-    }
-}
-
-struct RemoteRow: View {
-    @EnvironmentObject var model: NotchModel
-    let thread: RemoteThread
-    let now: Date
-    @State private var hover = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Circle().strokeBorder(Palette.state(thread.state), lineWidth: 1.5).frame(width: 8, height: 8).frame(width: 22)
-            Text(thread.title).font(.system(size: 14)).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
-            Spacer(minLength: 8)
-            Tag(text: "Amp")
-            Tag(text: "outside Rex")
-            Text(ago(thread.updated, now: now)).font(.system(size: 12)).foregroundStyle(.white.opacity(0.45)).frame(minWidth: 26, alignment: .trailing)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(hover ? 0.05 : 0)))
-        .contentShape(Rectangle())
-        .onHover { hover = $0 }
-        .onTapGesture { model.open(thread) }
-    }
-}
-
-/// A Claude or ChatGPT desktop session; clicking brings that app forward.
-struct DesktopRow: View {
-    @EnvironmentObject var model: NotchModel
-    let session: DesktopSession
-    let now: Date
-    @State private var hover = false
-
-    var expanded: Bool { ["done", "blocked", "error"].contains(session.state) }
-
-    var stateLine: String {
-        switch session.state {
-        case "done": return "Done — click to open \(session.name)"
-        case "blocked":
-            return "Waiting — \(session.name) " + (session.kind == "permission" ? "needs permission" : "has a question")
-        default: return ""
-        }
-    }
-
-    var body: some View {
-        HStack(alignment: expanded ? .top : .center, spacing: 12) {
-            Group {
-                if expanded {
-                    PixelIcon(color: Palette.state(session.state))
-                } else {
-                    Circle().fill(Palette.state(session.state)).frame(width: 8, height: 8)
-                }
-            }
-            .frame(width: 22)
-            .padding(.top, expanded ? 2 : 0)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(session.task)
-                        .font(.system(size: expanded ? 15 : 14, weight: expanded ? .semibold : .regular))
-                        .foregroundStyle(.white.opacity(expanded ? 1 : 0.8))
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Tag(text: session.name)
-                    Tag(text: "Desktop")
-                    Text(ago(session.since, now: now))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.45))
-                        .frame(minWidth: 26, alignment: .trailing)
-                }
-                if expanded {
-                    Text(stateLine).font(.system(size: 12.5)).foregroundStyle(Palette.state(session.state)).lineLimit(1)
-                }
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, expanded ? 12 : 9)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(expanded ? 0.07 : hover ? 0.05 : 0)))
-        .contentShape(Rectangle())
-        .onHover { hover = $0 }
-        .onTapGesture { model.open(session) }
-        .help(session.cwd)
-    }
-}
-
-struct DesktopPeekRow: View {
-    @EnvironmentObject var model: NotchModel
-    let session: DesktopSession
-
-    var body: some View {
-        HStack(spacing: 12) {
-            PixelIcon(color: Palette.state(session.state))
-            Text(session.task)
-                .font(.system(size: 14, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.75))
-                .lineLimit(1)
-            Spacer()
-            Text(session.state == "blocked" ? "\(session.name) needs you" : "\(session.name) done")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Palette.state(session.state))
-        }
-        .padding(.horizontal, 22)
-        .padding(.top, 4)
-        .padding(.bottom, 14)
-        .contentShape(Rectangle())
-        .onTapGesture { model.open(session) }
     }
 }
 
 // MARK: Ask
 
-/// What a blocked agent is asking, with its choices as buttons.
+/// What a blocked agent is asking, with its choices as standard buttons:
+/// Return picks the default, Esc denies, and digits pick a numbered choice.
 struct AskCard: View {
     @EnvironmentObject var model: NotchModel
     let agent: Agent
@@ -498,72 +484,54 @@ struct AskCard: View {
     var options: [Option] { agent.prompt?.options ?? [] }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             header
             title
             if let pv = agent.prompt?.preview, !pv.isEmpty { PreviewBox(lines: pv) }
             if permissionTitle != nil, let q = agent.prompt?.question, !q.isEmpty {
-                Text(q).font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
+                Text(q).font(.subheadline).foregroundStyle(.secondary)
             }
-            if options.isEmpty {
-                wideButton("Show in Rex", primary: true) { model.focus(agent) }
-            } else if permission && options.count >= 2 {
-                ForEach(Array(options.enumerated().dropFirst().dropLast()), id: \.offset) { i, o in
-                    optionRow(i, o)
-                }
-                HStack(spacing: 12) {
-                    wideButton(short(options.last!.label, fallback: "Deny"), primary: false) { model.choose(agent, option: options.count - 1) }
-                    wideButton(short(options.first!.label, fallback: "Allow"), primary: true) { model.choose(agent, option: 0) }
-                }
-            } else {
-                ForEach(Array(options.enumerated()), id: \.offset) { i, o in optionRow(i, o) }
-            }
+            buttons
             footer
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 6)
-        .padding(.bottom, 18)
+        .padding(8)
+    }
+
+    var headline: String {
+        switch agent.kind {
+        case "question": "\(agent.name) asks"
+        case "permission": "\(agent.name) wants permission"
+        case "auth": "\(agent.name) needs you to log in"
+        default: "\(agent.name) needs you"
+        }
     }
 
     var header: some View {
-        HStack(spacing: 8) {
-            switch agent.kind {
-            case "question":
-                Image(systemName: "bubble.left.fill").foregroundStyle(Palette.question)
-                Text("\(agent.name) asks").foregroundStyle(Palette.question).fontWeight(.semibold)
-            case "permission":
-                Circle().fill(Palette.blocked.opacity(0.85)).frame(width: 9, height: 9)
-                Text("Permission Request").foregroundStyle(.white.opacity(0.5))
-            case "auth":
-                Image(systemName: "key.fill").foregroundStyle(Palette.blocked)
-                Text("\(agent.name) needs you to log in").foregroundStyle(.white.opacity(0.5))
-            default:
-                Circle().fill(Palette.blocked.opacity(0.85)).frame(width: 9, height: 9)
-                Text("\(agent.name) needs you").foregroundStyle(.white.opacity(0.5))
+        HStack(spacing: 10) {
+            AppIcon(bundle: rexBundle, state: "blocked")
+            VStack(alignment: .leading, spacing: 1) {
+                Text(headline).font(.headline)
+                Text(agent.session).font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
-            Tag(text: agent.session)
             Button { model.dismiss(agent) } label: {
-                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.4))
+                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
             .help("Hide until it asks again")
         }
-        .font(.system(size: 15))
     }
 
     @ViewBuilder var title: some View {
         if let (tool, target) = permissionTitle {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle").foregroundStyle(Palette.blocked)
-                Text(tool).foregroundStyle(Palette.blocked).fontWeight(.bold)
-                Text(target).foregroundStyle(.white).lineLimit(1).truncationMode(.middle)
-            }
-            .font(.system(size: 17, design: .monospaced))
+            (Text(tool).fontWeight(.semibold) + Text(" ") + Text(target))
+                .font(.title3)
+                .lineLimit(1)
+                .truncationMode(.middle)
         } else {
             Text(agent.prompt?.question ?? agent.msg ?? agent.task)
-                .font(.system(size: 17))
-                .foregroundStyle(.white.opacity(0.92))
+                .font(.title3)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -582,56 +550,64 @@ struct AskCard: View {
         return nil
     }
 
-    var footer: some View {
-        HStack {
-            Button { model.focus(agent) } label: {
-                Text("Show in Rex").font(.system(size: 12)).foregroundStyle(.white.opacity(0.45))
+    @ViewBuilder var buttons: some View {
+        if options.isEmpty {
+            HStack {
+                Spacer()
+                Button("Show in Rex") { model.focus(agent) }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
             }
-            .buttonStyle(.plain)
-            Spacer()
-            let more = model.waiting.count - 1
-            if more > 0 {
-                Text("+\(more) more waiting").font(.system(size: 12)).foregroundStyle(Palette.blocked.opacity(0.8))
+            .controlSize(.large)
+        } else if permission && options.count >= 2 {
+            ForEach(Array(options.enumerated().dropFirst().dropLast()), id: \.offset) { i, o in
+                optionButton(i, o)
             }
+            HStack {
+                Spacer()
+                Button(short(options.last!.label, fallback: "Deny")) { model.choose(agent, option: options.count - 1) }
+                    .keyboardShortcut(.cancelAction)
+                Button(short(options.first!.label, fallback: "Allow")) { model.choose(agent, option: 0) }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .controlSize(.large)
+        } else {
+            ForEach(Array(options.enumerated()), id: \.offset) { i, o in optionButton(i, o) }
         }
     }
 
-    func optionRow(_ i: Int, _ o: Option) -> some View {
+    func optionButton(_ i: Int, _ o: Option) -> some View {
         Button { model.choose(agent, option: i) } label: {
-            HStack(spacing: 12) {
-                Text(o.key)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .frame(width: 28, height: 28)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Palette.optionKey))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(o.label).font(.system(size: 14.5)).foregroundStyle(.white.opacity(0.88)).lineLimit(1)
+            HStack(spacing: 8) {
+                Text(o.key).font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 14)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(o.label).lineLimit(1)
                     if let d = o.detail {
-                        Text(d).font(.system(size: 12)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
+                        Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Palette.option))
-            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 2)
         }
-        .buttonStyle(PressStyle())
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .keyboardShortcut(KeyEquivalent(o.key.first ?? "?"), modifiers: [])
     }
 
-    func wideButton(_ label: String, primary: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(primary ? .black : .white.opacity(0.88))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
-                .background(RoundedRectangle(cornerRadius: 10).fill(primary ? Color(white: 0.9) : Color(white: 0.17)))
-                .contentShape(Rectangle())
+    var footer: some View {
+        HStack {
+            Button("Show in Rex") { model.focus(agent) }
+                .buttonStyle(.link)
+                .font(.caption)
+            Spacer()
+            let more = model.waiting.count - 1
+            if more > 0 {
+                Text("\(more) more waiting").font(.caption).foregroundStyle(Palette.blocked)
+            }
         }
-        .buttonStyle(PressStyle())
     }
 
     /// "Yes" and "No" read better as Allow and Deny; keep other labels.
@@ -639,12 +615,6 @@ struct AskCard: View {
         let l = label.lowercased()
         if l == "yes" || l.hasPrefix("yes,") || l == "no" || l.hasPrefix("no,") { return fallback }
         return label
-    }
-}
-
-struct PressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 
@@ -664,17 +634,17 @@ struct PreviewBox: View {
             ForEach(Array(lines.prefix(10).enumerated()), id: \.offset) { _, l in
                 let k = kind(l)
                 Text(l.isEmpty ? " " : l)
-                    .font(.system(size: 12.5, design: .monospaced))
-                    .foregroundStyle(k == "+" ? Palette.done : k == "-" ? Color(red: 1, green: 0.55, blue: 0.5) : .white.opacity(0.5))
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(k == "+" ? Palette.done : k == "-" ? Palette.error : .secondary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 2.5)
-                    .background(k == "+" ? Palette.done.opacity(0.1) : k == "-" ? Palette.error.opacity(0.13) : .clear)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(k == "+" ? Palette.done.opacity(0.12) : k == "-" ? Palette.error.opacity(0.12) : .clear)
             }
         }
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.05)))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(0.05)))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }

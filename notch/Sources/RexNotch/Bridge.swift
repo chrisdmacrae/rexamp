@@ -166,7 +166,9 @@ final class NotchModel: ObservableObject {
     @Published var subscriptions: [Subscription] = []
     @Published var errors: [String: String] = [:]
     @Published var status: String?
-    @Published var hovering = false
+    @Published var hovering = false // the pointer is over the notch
+    @Published var expanded = false // the list is open, by a click on the notch
+    @Published var notifies = false // macOS notifications are allowed
     @Published var peek: Agent?
     @Published private(set) var dismissed: Set<String> = []
     @Published var loaded = false
@@ -175,11 +177,16 @@ final class NotchModel: ObservableObject {
     private var peekTimer: Timer?
     private var statusTimer: Timer?
 
+    private let notifier = Notifier()
+
     init() {
         bridge = Bridge { [weak self] d in self?.handle(d) }
     }
 
-    func start() { bridge.start() }
+    func start() {
+        notifier.start(self)
+        bridge.start()
+    }
     func stop() { bridge.stop() }
 
     private static let decoder: JSONDecoder = {
@@ -222,10 +229,22 @@ final class NotchModel: ObservableObject {
         }
     }
 
-    /// Peeks at an agent that just finished or failed.
+    /// Notifies when an agent finishes, fails, or needs you, or peeks at one
+    /// that finished or failed when notifications aren't allowed.
     private func notice(old: [Agent], new: [Agent]) {
         let was = Dictionary(old.map { ($0.block, $0.state) }, uniquingKeysWith: { a, _ in a })
-        for a in new where a.state != was[a.block] && (a.state == "done" || a.state == "error") && was[a.block] != nil {
+        for a in new where was[a.block] != nil && a.state != was[a.block] {
+            if was[a.block] == "blocked" { notifier.remove(id: a.block) }
+            guard ["done", "error", "blocked"].contains(a.state) else { continue }
+            if notifies {
+                let what = ["done": "finished", "error": "failed", "blocked": "needs you"][a.state]!
+                let body = a.state == "blocked" ? (a.prompt?.question ?? a.msg ?? a.task) : a.task
+                let permission = a.kind == "permission" && (a.prompt?.options.count ?? 0) >= 2
+                notifier.post(id: a.block, title: "\(a.name) \(what)", subtitle: a.session, body: body,
+                              urgent: a.state != "done", permission: permission, info: ["block": a.block])
+                continue
+            }
+            if a.state == "blocked" { continue } // the notch shows the question
             peek = a
             peekTimer?.invalidate()
             peekTimer = Timer.scheduledTimer(withTimeInterval: 6, repeats: false) { [weak self] _ in
@@ -240,6 +259,11 @@ final class NotchModel: ObservableObject {
     private func noticeDesktop(old: [DesktopSession], new: [DesktopSession]) {
         let was = Dictionary(old.map { ($0.id, $0.state) }, uniquingKeysWith: { a, _ in a })
         for s in new where was[s.id] != nil && s.state != was[s.id] && (s.state == "blocked" || (s.state == "done" && was[s.id] == "working")) {
+            if notifies {
+                notifier.post(id: "desktop-" + s.id, title: "\(s.name) " + (s.state == "blocked" ? "needs you" : "finished"),
+                              subtitle: "", body: s.task, urgent: s.state == "blocked", info: ["desktop": s.id])
+                continue
+            }
             peekDesktop = s
             peekTimer?.invalidate()
             peekTimer = Timer.scheduledTimer(withTimeInterval: s.state == "blocked" ? 12 : 6, repeats: false) { [weak self] _ in
@@ -325,7 +349,7 @@ final class NotchModel: ObservableObject {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.superlogical.rex").map {
             NSWorkspace.shared.openApplication(at: $0, configuration: .init())
         }
-        hovering = false
+        expanded = false
         peek = nil
     }
 
@@ -340,14 +364,14 @@ final class NotchModel: ObservableObject {
 
     func open(_ t: RemoteThread) {
         NSWorkspace.shared.open(URL(string: "https://ampcode.com/threads/\(t.id)")!)
-        hovering = false
+        expanded = false
     }
 
     func open(_ s: DesktopSession) {
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: s.bundle) {
             NSWorkspace.shared.openApplication(at: url, configuration: .init())
         }
-        hovering = false
+        expanded = false
         peekDesktop = nil
     }
 

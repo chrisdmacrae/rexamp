@@ -3,8 +3,8 @@ import ServiceManagement
 import SwiftUI
 
 // RexNotch shows the coding agents running in Rex panes around the MacBook
-// notch: a count beside it, a peek when one finishes, the question or
-// permission request when one needs you, and the full list on hover.
+// notch: the Rex dinosaur and a count beside it, macOS notifications when
+// one finishes or needs you, and the full list and usage when clicked.
 
 /// Where the notch is on a screen. Screens without one get a notch-sized
 /// tab at the top of the menu bar.
@@ -81,6 +81,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let kinds: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseUp]
         monitors.append(NSEvent.addGlobalMonitorForEvents(matching: kinds, handler: track) as Any)
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: kinds) { track($0); return $0 } as Any)
+        // Like a menu, the list closes on a click elsewhere or Esc.
+        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor in self?.model.expanded = false }
+        } as Any)
+        monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard e.keyCode == 53, let self, self.model.expanded else { return e }
+            self.model.expanded = false
+            return nil
+        } as Any)
 
         model.start()
 
@@ -124,13 +133,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if inside {
             leaveWork?.cancel()
             leaveWork = nil
-            if !model.hovering {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { model.hovering = true }
-            }
+            if !model.hovering { model.hovering = true }
         } else if model.hovering, leaveWork == nil {
             let w = DispatchWorkItem { [weak self] in
                 guard let self else { return }
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { self.model.hovering = false }
+                self.model.hovering = false
                 self.leaveWork = nil
             }
             leaveWork = w
