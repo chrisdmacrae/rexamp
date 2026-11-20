@@ -61,6 +61,9 @@ The Mac app also requires Xcode command-line tools (Swift 5.9 or newer):
 ## Publish a release
 
 Push a version tag such as `v0.1.0` to run `.github/workflows/release.yml`.
+To retry an unpublished release without moving its tag, use **Actions → Release →
+Run workflow** on `main` and enter the existing tag. The workflow builds the
+tagged source using the current workflow and `macos-latest` runner.
 After all builds succeed, it creates a GitHub release with generated notes and:
 
 - `RexNotch_macos_universal.zip` — ad-hoc signed Apple Silicon + Intel app.

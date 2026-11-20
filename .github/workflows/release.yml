@@ -3,12 +3,21 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -22,6 +31,8 @@ jobs:
         arch: [arm64, amd64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -52,15 +63,15 @@ jobs:
 
   notch:
     name: Universal macOS app (ad-hoc signed)
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - name: Build and verify app
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           VERSION="${RELEASE_TAG#v}" ./notch/build.sh --universal
           codesign --verify --deep --strict --verbose=2 notch/build/RexNotch.app
@@ -88,7 +99,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
           gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes \
