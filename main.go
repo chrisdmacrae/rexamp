@@ -43,7 +43,7 @@ func main() {
 	os.Setenv("PATH", strings.Join([]string{
 		os.Getenv("PATH"), home + "/.local/bin", home + "/.amp/bin", os.Getenv("REX_BIN_DIR"), "/opt/homebrew/bin",
 		home + "/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS",
-	}, ":"))
+	}, string(os.PathListSeparator)))
 	_, err := exec.LookPath("amp")
 	cfg.amp = err == nil
 

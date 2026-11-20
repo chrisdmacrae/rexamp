@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -73,7 +72,7 @@ func claudeDesktopSessions() []DesktopSession {
 			WaitingFor      string `json:"waitingFor"`
 			StatusUpdatedAt int64  `json:"statusUpdatedAt"`
 		}
-		if json.Unmarshal(b, &r) != nil || r.Entrypoint != "claude-desktop" || r.PID <= 0 || syscall.Kill(r.PID, 0) != nil {
+		if json.Unmarshal(b, &r) != nil || r.Entrypoint != "claude-desktop" || r.PID <= 0 || !processAlive(r.PID) {
 			continue
 		}
 		s := DesktopSession{ID: r.SessionID, App: "claude", Task: cmp.Or(r.Name, "new session"), Cwd: r.Cwd, State: "idle"}

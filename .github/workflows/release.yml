@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cli:
+    name: CLI (${{ matrix.os }}/${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [darwin, linux, windows]
+        arch: [arm64, amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: Build and package
+        shell: bash
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p dist
+          binary=amp-rex-hud
+          if [ "$GOOS" = windows ]; then binary+=.exe; fi
+          go build -trimpath -ldflags='-s -w' -o "dist/$binary" .
+          asset="amp-rex-hud_${GOOS}_${GOARCH}"
+          if [ "$GOOS" = windows ]; then
+            (cd dist && zip "$asset.zip" "$binary")
+          else
+            tar -czf "dist/$asset.tar.gz" -C dist "$binary"
+          fi
+          rm "dist/$binary"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  notch:
+    name: Universal macOS app (ad-hoc signed)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build and verify app
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}" ./notch/build.sh --universal
+          codesign --verify --deep --strict --verbose=2 notch/build/RexNotch.app
+          lipo -verify_arch arm64 x86_64 notch/build/RexNotch.app/Contents/MacOS/RexNotch
+          lipo -verify_arch arm64 x86_64 notch/build/RexNotch.app/Contents/MacOS/amp-rex-hud
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent notch/build/RexNotch.app dist/RexNotch_macos_universal.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: notch-macos-universal
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [cli, notch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+          gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes \
+            --notes 'RexNotch requires macOS 14 or newer. It is ad-hoc signed, not Apple-notarized; see the repository README for installation and Gatekeeper instructions. CLI assets use amd64 for x64 and arm64 for ARM64.'
