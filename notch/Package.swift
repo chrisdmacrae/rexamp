@@ -6,5 +6,6 @@ let package = Package(
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(name: "RexNotch", path: "Sources/RexNotch"),
+        .testTarget(name: "RexNotchTests", dependencies: ["RexNotch"]),
     ]
 )

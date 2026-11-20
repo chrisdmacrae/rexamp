@@ -83,15 +83,15 @@ struct NotchView: View {
     var mode: Mode {
         if model.expanded { return .list }
         // A waiting agent's choices show without a click, notification or not.
-        if model.asking != nil { return .ask }
-        if model.peek != nil || model.peekDesktop != nil { return .peek }
-        if model.agents.isEmpty && model.remote.isEmpty && model.desktop.isEmpty { return .idle }
+        if model.settings.values.showQuestions && model.asking != nil { return .ask }
+        if model.visiblePeek != nil || model.visiblePeekDesktop != nil { return .peek }
+        if !model.hasVisibleSessions { return .idle }
         return .compact
     }
 
     /// The strip shows its wings when anything runs, and when hovered so
     /// it's clear it can be clicked; hovering also widens it a little.
-    var wings: Bool { mode != .idle || model.hovering || model.expanded }
+    var wings: Bool { mode != .idle || model.hovering || model.expanded || model.settings.values.showWhenIdle || model.updater.active }
 
     var stripWidth: CGFloat {
         wings ? geometry.width + 2 * (Self.wing + (model.hovering ? 6 : 0)) : geometry.width
@@ -104,7 +104,7 @@ struct NotchView: View {
                 Group {
                     switch mode {
                     case .peek:
-                        if let a = model.peek { AgentRow(agent: a, now: .now) } else if let d = model.peekDesktop { DesktopRow(session: d, now: .now) }
+                        if let a = model.visiblePeek { AgentRow(agent: a, now: .now) } else if let d = model.visiblePeekDesktop { DesktopRow(session: d, now: .now) }
                     case .ask: model.asking.map { AskCard(agent: $0) }
                     default: AgentList()
                     }
@@ -132,15 +132,29 @@ struct NotchView: View {
         HStack(spacing: 0) {
             if wings {
                 let top = model.topState
-                DinoIcon(color: Palette.state(top), working: top == "working" && !reduceMotion)
-                    .frame(width: Self.wing)
+                Group {
+                    if model.updater.active {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 17, weight: .medium)).foregroundStyle(.white)
+                            .accessibilityLabel("Updating RexNotch")
+                    } else {
+                        DinoIcon(color: Palette.state(top), working: top == "working" && !reduceMotion)
+                    }
+                }.frame(width: Self.wing)
                 Spacer(minLength: geometry.width)
-                Text("\(max(model.activeCount, model.agents.count + model.desktop.count))")
-                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.8))
-                    .frame(minWidth: 18, minHeight: 18)
-                    .background(Capsule().fill(.white.opacity(0.15)))
-                    .frame(width: Self.wing)
+                Group {
+                    if model.updater.active {
+                        UpdateActivityIndicator().frame(width: 16, height: 16)
+                            .accessibilityLabel(model.updater.status)
+                            .help(model.updater.status)
+                    } else {
+                        Text("\(max(model.activeCount, model.visibleAgents.count + model.visibleDesktop.count))")
+                            .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.8))
+                            .frame(minWidth: 18, minHeight: 18)
+                            .background(Capsule().fill(.white.opacity(0.15)))
+                    }
+                }.frame(width: Self.wing)
             }
         }
         .frame(width: stripWidth, height: geometry.height)
@@ -150,6 +164,28 @@ struct NotchView: View {
         .onTapGesture { model.expanded.toggle() }
         .contextMenu {
             ForEach(menu()) { item in Button(item.title, action: item.action) }
+        }
+    }
+}
+
+/// White activity spokes keep their contrast on the always-black notch.
+struct UpdateActivityIndicator: View {
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 12, paused: reduceMotion)) { timeline in
+            Canvas { context, size in
+                let phase = reduceMotion ? 0 : Int(timeline.date.timeIntervalSinceReferenceDate * 12) % 8
+                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                for i in 0..<8 {
+                    let angle = Double(i) * .pi / 4
+                    var spoke = Path()
+                    spoke.move(to: CGPoint(x: center.x + 3 * cos(angle), y: center.y + 3 * sin(angle)))
+                    spoke.addLine(to: CGPoint(x: center.x + 6 * cos(angle), y: center.y + 6 * sin(angle)))
+                    let opacity = Double((i - phase + 8) % 8 + 1) / 8
+                    context.stroke(spoke, with: .color(.white.opacity(opacity)), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                }
+            }
         }
     }
 }
@@ -391,18 +427,18 @@ struct AgentList: View {
                     case .desktop(let d): DesktopRow(session: d, now: now)
                     }
                 }
-                ForEach(model.remote) { t in
+                ForEach(model.visibleRemote) { t in
                     RemoteRow(thread: t, now: now)
                 }
                 if !model.loaded {
                     note("Reading Rex…")
-                } else if model.agents.isEmpty && model.remote.isEmpty && model.desktop.isEmpty {
+                } else if !model.hasVisibleSessions {
                     note("No agents running")
                 }
-                if let e = model.errors["rex"] { note(e, color: Palette.error) }
+                if model.settings.values.showRex, let e = model.errors["rex"] { note(e, color: Palette.error) }
                 if let s = model.status { note(s, color: Palette.blocked) }
             }
-            if model.usage != nil || !model.subscriptions.isEmpty {
+            if model.showsUsage {
                 Divider()
                 UsageSection(now: now)
             }

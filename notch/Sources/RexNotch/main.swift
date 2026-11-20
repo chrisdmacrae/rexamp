@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ServiceManagement
 import SwiftUI
 
@@ -26,8 +27,9 @@ struct NotchGeometry: Equatable {
         }
     }
 
-    static func screen() -> NSScreen? {
-        NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main
+    static func screen(preferred: String = "automatic") -> NSScreen? {
+        if let selected = NSScreen.screens.first(where: { $0.displayID == preferred }) { return selected }
+        return NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main
     }
 }
 
@@ -55,11 +57,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var geometry: NotchGeometry!
     var monitors: [Any] = []
     var leaveWork: DispatchWorkItem?
+    var settingsWindow: SettingsWindowController?
+    var settingsSubscription: AnyCancellable?
 
     static let panelWidth: CGFloat = 640
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        guard let screen = NotchGeometry.screen() else { return }
+        guard let screen = NotchGeometry.screen(preferred: model.settings.values.display) else { return }
         geometry = NotchGeometry(screen)
 
         panel = Panel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -73,6 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.contentView = HostingView(rootView: root())
         place()
         panel.orderFrontRegardless()
+
+        settingsSubscription = model.settings.$values.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.place() }
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.place() }
@@ -93,6 +99,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         model.start()
 
+        let mainMenu = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit RexNotch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+        NSApp.mainMenu = mainMenu
+
         // build.sh --install passes this so installing also adds the login item.
         if CommandLine.arguments.contains("--open-at-login"), SMAppService.mainApp.status != .enabled {
             try? SMAppService.mainApp.register()
@@ -110,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func place() {
-        guard let screen = NotchGeometry.screen() else { return }
+        guard let screen = NotchGeometry.screen(preferred: model.settings.values.display) else { return }
         let g = NotchGeometry(screen)
         if g != geometry {
             geometry = g
@@ -148,13 +166,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc func openSettings() {
+        if settingsWindow == nil { settingsWindow = SettingsWindowController(model: model) }
+        settingsWindow?.open()
+    }
+
     func menuItems() -> [MenuItem] {
-        let login = SMAppService.mainApp.status == .enabled
         return [
+            MenuItem(title: "Settings…") { [weak self] in self?.openSettings() },
             MenuItem(title: "Refresh") { [weak self] in self?.model.refresh() },
-            MenuItem(title: login ? "Don't Open at Login" : "Open at Login") {
-                try? login ? SMAppService.mainApp.unregister() : SMAppService.mainApp.register()
-            },
             MenuItem(title: "Quit RexNotch") { NSApp.terminate(nil) },
         ]
     }

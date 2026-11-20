@@ -1,8 +1,7 @@
 import UserNotifications
 
 /// Posts macOS notifications when an agent finishes, fails, or needs you, with
-/// Allow and Deny buttons on permission requests. Without permission to
-/// notify, the notch peeks and shows the question itself instead.
+/// Allow and Deny buttons on permission requests. Notch previews are independent.
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private weak var model: NotchModel?
@@ -26,7 +25,40 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             ], intentIdentifiers: []),
         ])
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            Task { @MainActor in model.notifies = granted }
+            Task { @MainActor in self.refreshAuthorization() }
+        }
+    }
+
+    func refreshAuthorization() {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        center.getNotificationSettings { settings in
+            Task { @MainActor in
+                self.model?.notifies = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+                self.model?.notificationPermission = switch settings.authorizationStatus {
+                case .authorized, .provisional, .ephemeral: "Allowed"
+                case .denied: "Not allowed"
+                case .notDetermined: "Not requested"
+                @unknown default: "Unknown"
+                }
+            }
+        }
+    }
+
+    func test(completion: @escaping (String?) -> Void) {
+        guard Bundle.main.bundleIdentifier != nil else { completion("Notifications require the built app bundle."); return }
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            Task { @MainActor in
+                self.refreshAuthorization()
+                guard granted else { completion(error?.localizedDescription ?? "Allow RexNotch notifications in macOS Notification Settings first."); return }
+                let content = UNMutableNotificationContent()
+                content.title = "RexNotch test notification"
+                content.body = "You’re ready to receive agent activity notifications."
+                if self.model?.settings.values.notificationSound == true { content.sound = .default }
+                do {
+                    try await self.center.add(UNNotificationRequest(identifier: "rexnotch-test", content: content, trigger: nil))
+                    completion(nil)
+                } catch { completion(error.localizedDescription) }
+            }
         }
     }
 
@@ -35,12 +67,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func post(id: String, title: String, subtitle: String, body: String, urgent: Bool, permission: Bool = false, reply: Bool = false, info: [String: String]) {
         let c = UNMutableNotificationContent()
         c.title = title
-        c.subtitle = subtitle
-        c.body = body
+        let preferences = model?.settings.values ?? Preferences()
+        c.subtitle = preferences.notificationText ? subtitle : ""
+        c.body = preferences.notificationText ? body : (urgent ? "An agent needs your attention." : "An agent finished its task.")
         c.userInfo = info
         c.categoryIdentifier = permission ? "permission" : reply ? "reply" : "agent"
         c.threadIdentifier = id
-        if urgent { c.sound = .default }
+        if urgent && preferences.notificationSound { c.sound = .default }
         center.add(UNNotificationRequest(identifier: id, content: c, trigger: nil))
     }
 
@@ -62,11 +95,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     private func respond(_ action: String, _ info: [String: String], _ text: String?) {
         guard let model else { return }
-        if let id = info["desktop"], let s = model.desktop.first(where: { $0.id == id }) {
+        if let id = info["desktop"], let s = model.visibleDesktop.first(where: { $0.id == id }) {
             model.open(s)
             return
         }
-        guard let block = info["block"], let a = model.agents.first(where: { $0.block == block }) else { return }
+        guard let block = info["block"], let a = model.visibleAgents.first(where: { $0.block == block }) else { return }
         switch action {
         case "allow": model.choose(a, option: 0)
         case "deny": model.choose(a, option: max(0, (a.prompt?.options.count ?? 1) - 1))

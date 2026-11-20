@@ -41,6 +41,30 @@ If you trust the download, attempt to open it, then use **System Settings →
 Privacy & Security → Open Anyway**. The installer verifies the signature but
 does not bypass Gatekeeper or remove quarantine attributes.
 
+## Settings and automatic updates
+
+Right-click the notch and choose **Settings…** to open the native settings
+window. Preferences save immediately. General controls login startup, display
+selection, idle visibility, automatic question cards, and activity previews.
+Notifications controls completion, failure, and input alerts, sounds, and
+notification text privacy. Sources controls which agents, sessions, and usage
+appear; hiding a source also silences its alerts but does not stop collection.
+
+Automatic updates are enabled by default. RexNotch checks this repository's
+latest stable GitHub Release at startup and hourly, then downloads, verifies,
+replaces, and relaunches itself when a newer version is available. During the
+check and update, a **download icon replaces the dinosaur on the left** and an
+**activity spinner replaces the count on the right**. Settings → Updates offers
+an off switch, **Check Now**, and check/error status.
+
+Updates verify the archive's SHA-256 against `checksums.txt`, the app's bundle
+identity and version, and its code signature before replacing anything. The
+old app is restored if replacement or the launch command fails. These releases
+are still ad-hoc signed, not notarized: checksums and signature validation
+detect corruption, not a compromised GitHub release publisher. The app must
+be in a writable location, not running from a disk image. Only RexNotch and
+its bundled CLI update; a separate `~/.local/bin/amp-rex-hud` is unchanged.
+
 ## Build locally
 
 The CLI requires the Go version specified in `go.mod`:
@@ -56,6 +80,7 @@ The Mac app also requires Xcode command-line tools (Swift 5.9 or newer):
 ./notch/build.sh             # Native app, including the CLI
 ./notch/build.sh --universal # Apple Silicon + Intel, including a universal CLI
 ./notch/build.sh --install   # Native build, install, open, enable launch at login
+swift test --package-path notch # Native settings and updater tests
 ```
 
 ## Publish a release

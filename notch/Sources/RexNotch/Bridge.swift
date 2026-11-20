@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 
 // What `amp-rex-hud -json` writes; see stream.go.
@@ -165,6 +166,9 @@ final class Bridge {
 
 @MainActor
 final class NotchModel: ObservableObject {
+    let settings: Settings
+    let updater: AppUpdater
+    private var subscriptionsToChanges: Set<AnyCancellable> = []
     @Published var agents: [Agent] = []
     @Published var remote: [RemoteThread] = []
     @Published var desktop: [DesktopSession] = []
@@ -175,6 +179,7 @@ final class NotchModel: ObservableObject {
     @Published var hovering = false // the pointer is over the notch
     @Published var expanded = false // the list is open, by a click on the notch
     @Published var notifies = false // macOS notifications are allowed
+    @Published var notificationPermission = "Checking…"
     @Published var peek: Agent?
     @Published private(set) var dismissed: Set<String> = []
     @Published var loaded = false
@@ -185,15 +190,23 @@ final class NotchModel: ObservableObject {
 
     private let notifier = Notifier()
 
-    init() {
+    init(settings: Settings? = nil, updater: AppUpdater? = nil) {
+        self.settings = settings ?? Settings()
+        self.updater = updater ?? AppUpdater()
         bridge = Bridge { [weak self] d in self?.handle(d) }
+        self.settings.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptionsToChanges)
+        self.updater.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptionsToChanges)
     }
 
     func start() {
         notifier.start(self)
         bridge.start()
+        updater.start(settings: settings)
     }
-    func stop() { bridge.stop() }
+    func stop() { bridge.stop(); updater.stop() }
+
+    func refreshNotificationAuthorization() { notifier.refreshAuthorization() }
+    func testNotification(completion: @escaping (String?) -> Void) { notifier.test(completion: completion) }
 
     private static let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -235,21 +248,21 @@ final class NotchModel: ObservableObject {
         }
     }
 
-    /// Notifies when an agent finishes, fails, or needs you, or peeks at one
-    /// that finished or failed when notifications aren't allowed.
+    /// System notifications and notch previews are independently configurable.
     private func notice(old: [Agent], new: [Agent]) {
         let was = Dictionary(old.map { ($0.block, $0.state) }, uniquingKeysWith: { a, _ in a })
         for a in new where was[a.block] != nil && a.state != was[a.block] {
             if was[a.block] == "blocked" { notifier.remove(id: a.block) }
+            guard settings.values.showRex else { continue }
             guard ["done", "error", "blocked"].contains(a.state) else { continue }
-            if notifies {
+            if notifies && settings.values.notifies(state: a.shownState) {
                 let what = a.asks ? "asks" : ["done": "finished", "error": "failed", "blocked": "needs you"][a.state]!
                 let body = a.question ?? (a.state == "blocked" ? (a.prompt?.question ?? a.msg ?? a.task) : a.task)
                 let permission = a.kind == "permission" && (a.prompt?.options.count ?? 0) >= 2
                 notifier.post(id: a.block, title: "\(a.name) \(what)", subtitle: a.session, body: body,
                               urgent: a.shownState != "done", permission: permission, reply: a.state == "done", info: ["block": a.block])
-                continue
             }
+            guard settings.values.showPreviews else { continue }
             if a.shownState == "blocked" { continue } // the notch shows the question
             peek = a
             peekTimer?.invalidate()
@@ -265,11 +278,12 @@ final class NotchModel: ObservableObject {
     private func noticeDesktop(old: [DesktopSession], new: [DesktopSession]) {
         let was = Dictionary(old.map { ($0.id, $0.state) }, uniquingKeysWith: { a, _ in a })
         for s in new where was[s.id] != nil && s.state != was[s.id] && (s.state == "blocked" || (s.state == "done" && was[s.id] == "working")) {
-            if notifies {
+            guard settings.values.showsDesktop(app: s.app) else { continue }
+            if notifies && settings.values.notifies(state: s.state) {
                 notifier.post(id: "desktop-" + s.id, title: "\(s.name) " + (s.state == "blocked" ? "needs you" : "finished"),
                               subtitle: "", body: s.task, urgent: s.state == "blocked", info: ["desktop": s.id])
-                continue
             }
+            guard settings.values.showPreviews, s.state != "blocked" || settings.values.showQuestions else { continue }
             peekDesktop = s
             peekTimer?.invalidate()
             peekTimer = Timer.scheduledTimer(withTimeInterval: s.state == "blocked" ? 12 : 6, repeats: false) { [weak self] _ in
@@ -290,9 +304,22 @@ final class NotchModel: ObservableObject {
 
     static let rank = ["blocked": 5, "error": 4, "done": 3, "working": 2, "idle": 1]
 
+    var visibleAgents: [Agent] { settings.values.showRex ? agents : [] }
+    var visibleRemote: [RemoteThread] { settings.values.showRemote ? remote : [] }
+    var visibleDesktop: [DesktopSession] { desktop.filter { settings.values.showsDesktop(app: $0.app) } }
+    var visiblePeek: Agent? { settings.values.showPreviews && settings.values.showRex ? peek : nil }
+    var visiblePeekDesktop: DesktopSession? {
+        guard settings.values.showPreviews, let peekDesktop,
+              settings.values.showsDesktop(app: peekDesktop.app),
+              peekDesktop.state != "blocked" || settings.values.showQuestions else { return nil }
+        return peekDesktop
+    }
+    var hasVisibleSessions: Bool { !visibleAgents.isEmpty || !visibleRemote.isEmpty || !visibleDesktop.isEmpty }
+    var showsUsage: Bool { settings.values.showUsage && (usage != nil || !subscriptions.isEmpty) }
+
     /// Agents, most urgent first, then most recently changed.
     var sorted: [Agent] {
-        agents.sorted {
+        visibleAgents.sorted {
             let (a, b) = (Self.rank[$0.shownState] ?? 0, Self.rank[$1.shownState] ?? 0)
             if a != b { return a > b }
             return ($0.since ?? .distantPast) > ($1.since ?? .distantPast)
@@ -305,7 +332,7 @@ final class NotchModel: ObservableObject {
     var waiting: [Agent] { sorted.filter { $0.shownState == "blocked" } }
     var asking: Agent? { waiting.first { !dismissed.contains(Self.askKey($0)) } }
     var activeCount: Int {
-        agents.filter { $0.state != "idle" }.count + remote.filter { $0.state != "idle" }.count + desktop.filter { $0.state != "idle" }.count
+        visibleAgents.filter { $0.state != "idle" }.count + visibleRemote.filter { $0.state != "idle" }.count + visibleDesktop.filter { $0.state != "idle" }.count
     }
 
     enum Item: Identifiable {
@@ -333,7 +360,7 @@ final class NotchModel: ObservableObject {
 
     /// Rex agents and desktop sessions together, most urgent first.
     var items: [Item] {
-        (agents.map(Item.pane) + desktop.map(Item.desktop)).sorted {
+        (visibleAgents.map(Item.pane) + visibleDesktop.map(Item.desktop)).sorted {
             let (a, b) = (Self.rank[$0.state] ?? 0, Self.rank[$1.state] ?? 0)
             if a != b { return a > b }
             return ($0.since ?? .distantPast) > ($1.since ?? .distantPast)
@@ -342,7 +369,7 @@ final class NotchModel: ObservableObject {
 
     /// The most urgent state of anything shown, for the icon beside the notch.
     var topState: String {
-        let states = agents.map(\.shownState) + desktop.map(\.state)
+        let states = visibleAgents.map(\.shownState) + visibleDesktop.map(\.state)
         return states.max { (Self.rank[$0] ?? 0) < (Self.rank[$1] ?? 0) } ?? "idle"
     }
 
