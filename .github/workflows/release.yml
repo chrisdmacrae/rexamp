@@ -75,8 +75,10 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}" ./notch/build.sh --universal
           codesign --verify --deep --strict --verbose=2 notch/build/RexNotch.app
-          lipo -verify_arch arm64 x86_64 notch/build/RexNotch.app/Contents/MacOS/RexNotch
-          lipo -verify_arch arm64 x86_64 notch/build/RexNotch.app/Contents/MacOS/amp-rex-hud
+          for arch in arm64 x86_64; do
+            lipo notch/build/RexNotch.app/Contents/MacOS/RexNotch -verify_arch "$arch"
+            lipo notch/build/RexNotch.app/Contents/MacOS/amp-rex-hud -verify_arch "$arch"
+          done
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent notch/build/RexNotch.app dist/RexNotch_macos_universal.zip
       - uses: actions/upload-artifact@v4
