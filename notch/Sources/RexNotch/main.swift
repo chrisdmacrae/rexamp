@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var monitors: [Any] = []
     var leaveWork: DispatchWorkItem?
 
-    static let panelSize = CGSize(width: 640, height: 560)
+    static let panelWidth: CGFloat = 640
 
     func applicationDidFinishLaunching(_ note: Notification) {
         guard let screen = NotchGeometry.screen() else { return }
@@ -105,7 +105,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotchView(geometry: geometry, menu: { [weak self] in self?.menuItems() ?? [] })
             .environmentObject(model)
             .environmentObject(shape)
-            .frame(width: Self.panelSize.width, height: Self.panelSize.height, alignment: .top)
+            .frame(width: Self.panelWidth, alignment: .top)
+            .frame(maxHeight: .infinity, alignment: .top)
     }
 
     func place() {
@@ -115,7 +116,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             geometry = g
             panel.contentView = HostingView(rootView: root())
         }
-        let s = Self.panelSize
+        // The panel spans the screen's height so the list grows as far as it
+        // needs; clicks outside the drawn shape fall through (mouseMoved).
+        let s = CGSize(width: Self.panelWidth, height: screen.frame.height)
         panel.setFrame(NSRect(x: screen.frame.midX - s.width / 2, y: screen.frame.maxY - s.height, width: s.width, height: s.height), display: true)
     }
 

@@ -369,37 +369,45 @@ struct AgentList: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { tl in
-            VStack(alignment: .leading, spacing: 8) {
-                if let a = model.asking {
-                    AskCard(agent: a)
-                    Divider()
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    sectionTitle("Agents")
-                    ForEach(model.items) { item in
-                        switch item {
-                        case .pane(let a): AgentRow(agent: a, now: tl.date)
-                        case .desktop(let d): DesktopRow(session: d, now: tl.date)
-                        }
-                    }
-                    ForEach(model.remote) { t in
-                        RemoteRow(thread: t, now: tl.date)
-                    }
-                    if !model.loaded {
-                        note("Reading Rex…")
-                    } else if model.agents.isEmpty && model.remote.isEmpty && model.desktop.isEmpty {
-                        note("No agents running")
-                    }
-                    if let e = model.errors["rex"] { note(e, color: Palette.error) }
-                    if let s = model.status { note(s, color: Palette.blocked) }
-                }
-                if model.usage != nil || !model.subscriptions.isEmpty {
-                    Divider()
-                    UsageSection(now: tl.date)
-                }
+            // Scrolls only when the list is taller than the screen.
+            ViewThatFits(in: .vertical) {
+                content(tl.date)
+                ScrollView { content(tl.date) }
             }
-            .padding(10)
         }
+    }
+
+    func content(_ now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let a = model.asking {
+                AskCard(agent: a)
+                Divider()
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                sectionTitle("Agents")
+                ForEach(model.items) { item in
+                    switch item {
+                    case .pane(let a): AgentRow(agent: a, now: now)
+                    case .desktop(let d): DesktopRow(session: d, now: now)
+                    }
+                }
+                ForEach(model.remote) { t in
+                    RemoteRow(thread: t, now: now)
+                }
+                if !model.loaded {
+                    note("Reading Rex…")
+                } else if model.agents.isEmpty && model.remote.isEmpty && model.desktop.isEmpty {
+                    note("No agents running")
+                }
+                if let e = model.errors["rex"] { note(e, color: Palette.error) }
+                if let s = model.status { note(s, color: Palette.blocked) }
+            }
+            if model.usage != nil || !model.subscriptions.isEmpty {
+                Divider()
+                UsageSection(now: now)
+            }
+        }
+        .padding(10)
     }
 
     func sectionTitle(_ s: String) -> some View {
