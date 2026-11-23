@@ -32,6 +32,19 @@ final class UpdaterTests: XCTestCase {
         XCTAssertThrowsError(try release.asset(named: "checksums.txt"))
     }
 
+    func testReleaseAssetFromRenamedRepository() throws {
+        for repo in ["rexnotch", "rexamp"] {
+            let release = GitHubRelease(tag_name: "v1.0", draft: false, prerelease: false, assets: [
+                .init(name: ReleaseInstaller.assetName, browser_download_url: URL(string: "https://github.com/chrisdmacrae/\(repo)/releases/download/v1/app.zip")!),
+            ])
+            XCTAssertNoThrow(try release.asset(named: ReleaseInstaller.assetName), repo)
+        }
+        let lookalike = GitHubRelease(tag_name: "v1.0", draft: false, prerelease: false, assets: [
+            .init(name: ReleaseInstaller.assetName, browser_download_url: URL(string: "https://github.com/chrisdmacrae/rexnotch-fork/releases/download/v1/app.zip")!),
+        ])
+        XCTAssertThrowsError(try lookalike.asset(named: ReleaseInstaller.assetName))
+    }
+
     func testVerifiedReplacementAndRollbackWithPathsContainingSpaces() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("RexNotch update test " + UUID().uuidString)

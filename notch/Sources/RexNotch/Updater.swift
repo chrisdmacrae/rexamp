@@ -30,10 +30,14 @@ struct GitHubRelease: Decodable {
         return false
     }
 
+    /// The repository's names: rexamp was renamed rexnotch, and GitHub serves
+    /// release assets under the current name.
+    static let repositoryPaths = ["/chrisdmacrae/rexnotch/", "/chrisdmacrae/rexamp/"]
+
     func asset(named name: String) throws -> URL {
         guard let url = assets.first(where: { $0.name == name })?.browser_download_url,
               url.scheme == "https", url.host == "github.com",
-              url.path.hasPrefix("/chrisdmacrae/rexamp/releases/download/") else {
+              Self.repositoryPaths.contains(where: { url.path.hasPrefix($0 + "releases/download/") }) else {
             throw UpdateError("The release is missing a trusted \(name) asset.")
         }
         return url
