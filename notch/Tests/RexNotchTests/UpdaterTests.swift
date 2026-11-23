@@ -56,7 +56,7 @@ final class UpdaterTests: XCTestCase {
         let fixture = root.appendingPathComponent("fixture/RexNotch.app")
         let macOS = fixture.appendingPathComponent("Contents/MacOS")
         try fm.createDirectory(at: macOS, withIntermediateDirectories: true)
-        for name in ["RexNotch", "amp-rex-hud"] {
+        for name in ["RexNotch", "rex-hud"] {
             try fm.copyItem(atPath: "/usr/bin/true", toPath: macOS.appendingPathComponent(name).path)
         }
         let plist: [String: Any] = ["CFBundleIdentifier": "com.chrisdmacrae.rexnotch", "CFBundleExecutable": "RexNotch",

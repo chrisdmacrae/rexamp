@@ -1,4 +1,4 @@
-// amp-rex-hud is a terminal HUD for Amp, Claude, and Codex usage and the coding agents (Amp,
+// rex-hud is a terminal HUD for Amp, Claude, and Codex usage and the coding agents (Amp,
 // Claude Code, Codex, Foundation Models chats) running in Rex panes and in the Claude and ChatGPT
 // desktop apps. Run it in a Rex split; see init.lua for a toggle key.
 package main
@@ -545,7 +545,7 @@ func (m *model) notify(title, subtitle, body string) {
 	// Report it to Rex too, so the HUD's own tab shows the alert when unfocused.
 	text := strings.TrimSpace(title + ": " + subtitle + " " + body)
 	if !m.cfg.stream {
-		fmt.Fprintf(os.Stdout, "\x1b]7501;state=done:app=amp-rex-hud:msg=%s\x1b\\", base64.StdEncoding.EncodeToString([]byte(text)))
+		fmt.Fprintf(os.Stdout, "\x1b]7501;state=done:app=rex-hud:msg=%s\x1b\\", base64.StdEncoding.EncodeToString([]byte(text)))
 	}
 	if !m.cfg.notify {
 		return

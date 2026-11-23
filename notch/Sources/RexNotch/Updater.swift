@@ -82,7 +82,7 @@ enum ReleaseInstaller {
                   let actualVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
                   GitHubRelease.version(actualVersion) == GitHubRelease.version(version),
                   fm.isExecutableFile(atPath: app.appendingPathComponent("Contents/MacOS/RexNotch").path),
-                  fm.isExecutableFile(atPath: app.appendingPathComponent("Contents/MacOS/amp-rex-hud").path) else {
+                  fm.isExecutableFile(atPath: app.appendingPathComponent("Contents/MacOS/rex-hud").path) else {
                 throw UpdateError("The update is not the expected RexNotch app and version.")
             }
             try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path])
@@ -210,7 +210,7 @@ final class AppUpdater: ObservableObject {
                 task = nil
             }
             do {
-                let metadata = try await fetch(URL(string: "https://api.github.com/repos/chrisdmacrae/rexamp/releases/latest")!)
+                let metadata = try await fetch(URL(string: "https://api.github.com/repos/chrisdmacrae/rexnotch/releases/latest")!)
                 let release = try JSONDecoder().decode(GitHubRelease.self, from: metadata)
                 lastChecked = Date()
                 guard !release.draft, !release.prerelease, GitHubRelease.isNewer(release.tag_name, than: installedVersion) else {

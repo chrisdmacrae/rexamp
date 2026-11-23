@@ -1,9 +1,9 @@
 // Serves the live state of your recent Amp threads on localhost for
-// amp-rex-hud, wherever each thread runs: this machine, other runners, orbs.
+// rex-hud, wherever each thread runs: this machine, other runners, orbs.
 // Install by symlinking into ~/.config/amp/plugins/.
 import type { PluginAPI, ThreadID, ThreadState } from '@ampcode/plugin'
 
-export const description = 'Serves live state of recent Amp threads on 127.0.0.1:7789 for the amp-rex-hud terminal HUD'
+export const description = 'Serves live state of recent Amp threads on 127.0.0.1:7789 for the rex-hud terminal HUD'
 
 const PORT = Number(process.env.AMP_HUD_BRIDGE_PORT ?? 7789)
 const LIMIT = 20

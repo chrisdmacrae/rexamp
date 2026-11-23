@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import Foundation
 
-// What `amp-rex-hud -json` writes; see stream.go.
+// What `rex-hud -json` writes; see stream.go.
 
 struct Option: Decodable, Hashable {
     let key: String
@@ -96,7 +96,7 @@ private struct Line: Decodable {
     let message: String?
 }
 
-/// Runs amp-rex-hud in JSON mode, restarting it if it exits, and passes each
+/// Runs rex-hud in JSON mode, restarting it if it exits, and passes each
 /// line it writes to onLine on the main queue.
 final class Bridge {
     private var process: Process?
@@ -110,14 +110,14 @@ final class Bridge {
 
     static func executable() -> URL? {
         if let p = ProcessInfo.processInfo.environment["REXNOTCH_HUD"] { return URL(fileURLWithPath: p) }
-        if let u = Bundle.main.url(forAuxiliaryExecutable: "amp-rex-hud") { return u }
-        let u = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/amp-rex-hud")
+        if let u = Bundle.main.url(forAuxiliaryExecutable: "rex-hud") { return u }
+        let u = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/rex-hud")
         return FileManager.default.isExecutableFile(atPath: u.path) ? u : nil
     }
 
     func start() {
         guard let exe = Bridge.executable() else {
-            onLine(#"{"type":"status","message":"amp-rex-hud not found; run notch/build.sh"}"#.data(using: .utf8)!)
+            onLine(#"{"type":"status","message":"rex-hud not found; run notch/build.sh"}"#.data(using: .utf8)!)
             return
         }
         let p = Process()
@@ -139,7 +139,7 @@ final class Bridge {
             process = p
             stdin = inp.fileHandleForWriting
         } catch {
-            onLine(try! JSONEncoder().encode(["type": "status", "message": "Couldn't start amp-rex-hud: \(error.localizedDescription)"]))
+            onLine(try! JSONEncoder().encode(["type": "status", "message": "Couldn't start rex-hud: \(error.localizedDescription)"]))
         }
     }
 

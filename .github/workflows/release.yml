@@ -45,10 +45,10 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           mkdir -p dist
-          binary=amp-rex-hud
+          binary=rex-hud
           if [ "$GOOS" = windows ]; then binary+=.exe; fi
           go build -trimpath -ldflags='-s -w' -o "dist/$binary" .
-          asset="amp-rex-hud_${GOOS}_${GOARCH}"
+          asset="rex-hud_${GOOS}_${GOARCH}"
           if [ "$GOOS" = windows ]; then
             (cd dist && zip "$asset.zip" "$binary")
           else
@@ -77,7 +77,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 notch/build/RexNotch.app
           for arch in arm64 x86_64; do
             lipo notch/build/RexNotch.app/Contents/MacOS/RexNotch -verify_arch "$arch"
-            lipo notch/build/RexNotch.app/Contents/MacOS/amp-rex-hud -verify_arch "$arch"
+            lipo notch/build/RexNotch.app/Contents/MacOS/rex-hud -verify_arch "$arch"
           done
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent notch/build/RexNotch.app dist/RexNotch_macos_universal.zip

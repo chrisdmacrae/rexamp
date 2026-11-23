@@ -14,7 +14,7 @@ func TestAgentOf(t *testing.T) {
 		{"codex", []string{"codex", "codex", "/Users/me/.local/bin/codex", "/Users/me/.codex/packages/standalone/releases/0.170.0-aarch64-apple-darwin/bin/codex"}},
 		{"amp", []string{"amp", "amp", "/Users/me/.local/bin/amp", "/Users/me/.amp/bin/amp"}},
 		{"", []string{"zsh", "-zsh", "/bin/zsh", "/bin/zsh"}},
-		{"", []string{"rexamp", "/Users/me/.local/bin/amp-rex-hud", "/Users/me/.local/bin/amp-rex-hud", "/Users/me/.local/bin/rexamp"}},
+		{"", []string{"rexamp", "/Users/me/.local/bin/rex-hud", "/Users/me/.local/bin/amp-rex-hud", "/Users/me/.local/bin/rexamp"}},
 	}
 	for _, c := range cases {
 		if got := agentOf(c.names...); got != c.want {

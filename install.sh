@@ -29,7 +29,7 @@ else
   fail 'sha256sum or shasum is required to verify downloads'
 fi
 
-base=https://github.com/chrisdmacrae/rexamp/releases
+base=https://github.com/chrisdmacrae/rexnotch/releases
 if [ -n "${VERSION:-}" ]; then
   base="$base/download/$VERSION"
 else
@@ -52,8 +52,8 @@ download() {
   [ "$actual" = "$expected" ] || fail "Checksum mismatch for $1"
 }
 
-binary=amp-rex-hud
-asset="amp-rex-hud_${os}_${arch}"
+binary=rex-hud
+asset="rex-hud_${os}_${arch}"
 if [ "$os" = windows ]; then
   command -v unzip >/dev/null 2>&1 || fail 'unzip is required'
   binary=$binary.exe
@@ -74,6 +74,12 @@ bin_dir=${BIN_DIR:-"$HOME/.local/bin"}
 mkdir -p "$bin_dir"
 install -m 755 "$tmp/cli/$binary" "$bin_dir/$binary"
 echo "Installed $bin_dir/$binary"
+# The CLI was named amp-rex-hud; point an old install at the new one.
+old="$bin_dir/amp-rex-hud"
+if [ "$os" != windows ] && [ -f "$old" ] && [ ! -L "$old" ]; then
+  ln -sf "$binary" "$old"
+  echo "Linked $old to $binary"
+fi
 if [ "$os" = darwin ]; then
   mkdir -p "$app_dir"
   ditto "$tmp/app/RexNotch.app" "$app_dir/RexNotch.app"

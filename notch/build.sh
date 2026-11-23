@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds RexNotch.app with amp-rex-hud inside it. Pass --install to copy it
+# Builds RexNotch.app with rex-hud inside it. Pass --install to copy it
 # to ~/Applications, open it, and have it open at login. Pass --universal
 # to build for both Apple Silicon and Intel (used for GitHub releases).
 set -eu
@@ -26,12 +26,15 @@ if "$universal"; then
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   for arch in arm64 amd64; do
-    (cd .. && CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -ldflags='-s -w' -o "$tmp/amp-rex-hud-$arch" .)
+    (cd .. && CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -ldflags='-s -w' -o "$tmp/rex-hud-$arch" .)
   done
-  lipo -create "$tmp/amp-rex-hud-arm64" "$tmp/amp-rex-hud-amd64" -output "$app/Contents/MacOS/amp-rex-hud"
+  lipo -create "$tmp/rex-hud-arm64" "$tmp/rex-hud-amd64" -output "$app/Contents/MacOS/rex-hud"
 else
-  (cd .. && go build -o "notch/$app/Contents/MacOS/amp-rex-hud" .)
+  (cd .. && go build -o "notch/$app/Contents/MacOS/rex-hud" .)
 fi
+# The CLI was named amp-rex-hud, and RexNotch 0.3 only installs an update
+# that has it, so keep the old name as a link.
+ln -s rex-hud "$app/Contents/MacOS/amp-rex-hud"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

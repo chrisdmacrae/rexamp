@@ -1,4 +1,4 @@
-module github.com/chrisdmacrae/amp-rex-hud
+module github.com/chrisdmacrae/rexnotch
 
 go 1.26.1
 

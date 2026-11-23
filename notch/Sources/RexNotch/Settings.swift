@@ -293,7 +293,7 @@ struct SettingsView: View {
             Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
-                Button("View on GitHub ↗") { NSWorkspace.shared.open(URL(string: "https://github.com/chrisdmacrae/rexamp")!) }
+                Button("View on GitHub ↗") { NSWorkspace.shared.open(URL(string: "https://github.com/chrisdmacrae/rexnotch")!) }
                 Button("Copy Diagnostics") {
                     let text = """
                     RexNotch \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")

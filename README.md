@@ -1,19 +1,22 @@
-# RexNotch and amp-rex-hud
+# RexNotch and rex-hud
 
 RexNotch is a macOS notch HUD for coding-agent activity and usage. It bundles
-the `amp-rex-hud` CLI, which can also run independently in a terminal.
+the `rex-hud` CLI, which can also run independently in a terminal.
+
+The project was named rexamp and the CLI `amp-rex-hud`. Installing or updating
+leaves `amp-rex-hud` as a link to `rex-hud`, so older scripts keep working.
 
 ## Install a release
 
 On macOS (14 or newer), install both RexNotch and the CLI:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/chrisdmacrae/rexamp/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/chrisdmacrae/rexnotch/main/install.sh | sh
 ```
 
 The same command installs only the CLI on Linux. On Windows, run it in Git Bash,
 or download and extract the appropriate CLI ZIP from
-[GitHub Releases](https://github.com/chrisdmacrae/rexamp/releases). Windows
+[GitHub Releases](https://github.com/chrisdmacrae/rexnotch/releases). Windows
 PowerShell alone cannot run this POSIX shell installer.
 
 The installer selects arm64 or amd64 (x64) automatically, verifies SHA-256
@@ -25,7 +28,7 @@ start at login automatically.
 To select a release or change the install directories:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/chrisdmacrae/rexamp/main/install.sh | \
+curl -fsSL https://raw.githubusercontent.com/chrisdmacrae/rexnotch/main/install.sh | \
   VERSION=v0.1.0 BIN_DIR="$HOME/.local/bin" APP_DIR="$HOME/Applications" sh
 ```
 
@@ -63,7 +66,7 @@ old app is restored if replacement or the launch command fails. These releases
 are still ad-hoc signed, not notarized: checksums and signature validation
 detect corruption, not a compromised GitHub release publisher. The app must
 be in a writable location, not running from a disk image. Only RexNotch and
-its bundled CLI update; a separate `~/.local/bin/amp-rex-hud` is unchanged.
+its bundled CLI update; a separate `~/.local/bin/rex-hud` is unchanged.
 
 ## Tracked agents
 
@@ -76,8 +79,8 @@ such as `respond` and `serve`, are not tracked. Its usage is not shown.
 
 ## Rex actions
 
-`init.lua` adds Rex actions that call `~/.local/bin/amp-rex-hud`. Load it from
-`~/.config/rex/init.lua` with `dofile(os.getenv("HOME") .. "/path/to/rexamp/init.lua")`
+`init.lua` adds Rex actions that call `~/.local/bin/rex-hud`. Load it from
+`~/.config/rex/init.lua` with `dofile(os.getenv("HOME") .. "/path/to/rexnotch/init.lua")`
 and run `rex config reload`.
 
 - **Shift+Cmd+H, Toggle Amp HUD** opens or closes the live HUD in a split.
@@ -88,7 +91,7 @@ and run `rex config reload`.
 
 The last two are also buttons at the bottom of the HUD.
 
-They use `amp-rex-hud -once -json`, which reads Rex once without checking usage,
+They use `rex-hud -once -json`, which reads Rex once without checking usage,
 and `-cmd` to focus, choose, or reply. Showing a pane needs Remote Control on.
 
 ## Build locally
@@ -96,7 +99,7 @@ and `-cmd` to focus, choose, or reply. Showing a pane needs Remote Control on.
 The CLI requires the Go version specified in `go.mod`:
 
 ```sh
-go build -o amp-rex-hud .
+go build -o rex-hud .
 go test ./...
 ```
 
@@ -118,8 +121,8 @@ tagged source using the current workflow and `macos-latest` runner.
 After all builds succeed, it creates a GitHub release with generated notes and:
 
 - `RexNotch_macos_universal.zip` — ad-hoc signed Apple Silicon + Intel app.
-- `amp-rex-hud_{darwin,linux}_{arm64,amd64}.tar.gz` — macOS and Linux CLIs.
-- `amp-rex-hud_windows_{arm64,amd64}.zip` — Windows CLIs.
+- `rex-hud_{darwin,linux}_{arm64,amd64}.tar.gz` — macOS and Linux CLIs.
+- `rex-hud_windows_{arm64,amd64}.zip` — Windows CLIs.
 - `checksums.txt` — SHA-256 checksums for every archive.
 
 The workflow needs no signing secrets; only its built-in `GITHUB_TOKEN` gets

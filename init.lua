@@ -1,5 +1,5 @@
--- Rex actions for amp-rex-hud. Load this file from ~/.config/rex/init.lua with
--- dofile(os.getenv("HOME") .. "/Developer/tools/rexamp/init.lua"), then run
+-- Rex actions for rex-hud. Load this file from ~/.config/rex/init.lua with
+-- dofile(os.getenv("HOME") .. "/Developer/tools/rexnotch/init.lua"), then run
 -- rex config reload.
 --
 --   Shift+Cmd+H  Toggle Amp HUD     the live HUD in a split beside the pane
@@ -9,7 +9,7 @@
 -- The last two are also buttons at the bottom of the HUD.
 
 local HUD_LABEL = "amp-hud"
-local HUD_BIN = os.getenv("HOME") .. "/.local/bin/amp-rex-hud"
+local HUD_BIN = os.getenv("HOME") .. "/.local/bin/rex-hud"
 
 rex.action{
   name     = "amp_hud",
@@ -51,7 +51,7 @@ rex.action{
   end,
 }
 
--- hud runs amp-rex-hud -once -json, which reads the Rex panes once, and
+-- hud runs rex-hud -once -json, which reads the Rex panes once, and
 -- returns what it printed. With cmd, it runs that command on them instead.
 local function hud(ctx, cmd)
   local argv = { HUD_BIN, "-once", "-json" }
@@ -67,7 +67,7 @@ local function hud(ctx, cmd)
   if r == nil then error(err, 0) end
   if not r.ok then
     local msg = r.stderr:gsub("%s+$", "")
-    error(msg ~= "" and msg or "amp-rex-hud failed", 0)
+    error(msg ~= "" and msg or "rex-hud failed", 0)
   end
   return r.stdout
 end
