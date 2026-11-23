@@ -129,7 +129,7 @@ end
 rex.action{
   name        = "amp_agents",
   title       = "Switch to Agent…",
-  description = "Show an Amp, Claude Code, or Codex pane, with the ones that need you first.",
+  description = "Show an Amp, Claude Code, Codex, or Foundation Models pane, with the ones that need you first.",
   category    = "Amp",
   keywords    = "amp claude codex agents panes jump go",
   run         = function(ctx, args)

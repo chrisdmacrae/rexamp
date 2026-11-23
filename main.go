@@ -1,5 +1,5 @@
 // amp-rex-hud is a terminal HUD for Amp, Claude, and Codex usage and the coding agents (Amp,
-// Claude Code, Codex) running in Rex panes and in the Claude and ChatGPT
+// Claude Code, Codex, Foundation Models chats) running in Rex panes and in the Claude and ChatGPT
 // desktop apps. Run it in a Rex split; see init.lua for a toggle key.
 package main
 
@@ -142,7 +142,7 @@ type model struct {
 	agentLines  map[int]int     // agents box body line -> agent index, set by View
 	agentAt     map[int]int     // screen line -> agent index, set by View
 	lastClick   time.Time
-	lastClickAt int // agent index of lastClick
+	lastClickAt int        // agent index of lastClick
 	buttons     []buttonAt // set by View
 	buttonY     int        // screen line of the buttons, set by View
 }
@@ -411,6 +411,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if msg.err == nil {
+			keepSince(m.rex, msg.snap)
 			m.alertTransitions(m.rex, msg.snap)
 			m.rex = msg.snap
 			if n := len(m.agents()); m.cursor >= n && n > 0 {
@@ -483,6 +484,25 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 	return m, nil
+}
+
+// keepSince dates the state of agents that report none, such as fm, from
+// the snapshot it first appeared in.
+func keepSince(old, cur RexSnapshot) {
+	prev := map[string]Pane{}
+	for _, p := range old.Panes {
+		prev[p.BlockID] = p
+	}
+	for i, p := range cur.Panes {
+		if p.Agent != "fm" {
+			continue
+		}
+		if o, ok := prev[p.BlockID]; ok && o.Agent == p.Agent && o.State == p.State {
+			cur.Panes[i].Since = o.Since // zero when it was already so at the start
+		} else if !old.At.IsZero() {
+			cur.Panes[i].Since = cur.At
+		}
+	}
 }
 
 // alertTransitions notifies when an agent in a pane finishes or starts waiting on you.

@@ -65,6 +65,15 @@ detect corruption, not a compromised GitHub release publisher. The app must
 be in a writable location, not running from a disk image. Only RexNotch and
 its bundled CLI update; a separate `~/.local/bin/amp-rex-hud` is unchanged.
 
+## Tracked agents
+
+Rex panes running Amp, Claude Code, Codex, or an `fm chat` session (Apple's
+Foundation Models CLI, `/usr/bin/fm` on macOS 27) appear as agents, along with
+Claude and ChatGPT desktop sessions. `fm` reports no status, so its state is
+read from the screen: working while a message has no finished reply, then
+done, with the reply's closing question if it asks one. Other `fm` commands,
+such as `respond` and `serve`, are not tracked. Its usage is not shown.
+
 ## Rex actions
 
 `init.lua` adds Rex actions that call `~/.local/bin/amp-rex-hud`. Load it from

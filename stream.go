@@ -33,8 +33,8 @@ type streamAgent struct {
 	Host    string    `json:"host"`
 	Session string    `json:"session"`
 	Window  string    `json:"window"`
-	Agent   string    `json:"agent"` // amp, claude, or codex
-	Name    string    `json:"name"`  // Amp, Claude Code, or Codex
+	Agent   string    `json:"agent"` // amp, claude, codex, or fm
+	Name    string    `json:"name"`  // Amp, Claude Code, Codex, or Foundation Models
 	Task    string    `json:"task"`
 	Cwd     string    `json:"cwd"`
 	State   string    `json:"state"` // idle, working, done, blocked, error

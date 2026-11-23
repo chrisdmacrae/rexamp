@@ -1,0 +1,25 @@
+ Foundation Models Chat
+ model: system · /help for help
+
+ > Say hi in 5 words.
+
+ Hello!
+
+   • Hi there!
+
+
+ > Reply with exactly a markdown blockquote of a two-line famous quote, then the author, then ask if I want another one. This prompt is deliberately long so that it wraps across more than one line of
+ the terminal, which lets me see how wrapped prompts are drawn on screen by the chat interface, thanks so much.
+
+   ─── markdown ───
+   "Be yourself; everyone else is just a borrowed version."
+   — Oscar Wilde
+
+   Want another quote?"
+   ──────
+
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ >                                                                                                                                                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ system (AFM 3 Core Advanced) · turn 2 · ↑ 299 · ↓ 44 · 343 / 8,192 (4% used)

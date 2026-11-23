@@ -508,6 +508,9 @@ func (m *model) paneTask(p Pane) string {
 	if p.Agent == "amp" {
 		return firstNonEmpty(m.threadTitleFor(p), "new thread")
 	}
+	if p.Task != "" {
+		return p.Task
+	}
 	t := spinnerRe.ReplaceAllString(p.Title, "")
 	if dir := shortPath(p.Cwd); dir != "" {
 		t = strings.TrimSuffix(t, " | "+dir)
@@ -521,6 +524,8 @@ func agentName(agent string) string {
 		return "Claude Code"
 	case "codex":
 		return "Codex"
+	case "fm":
+		return "Foundation Models"
 	}
 	return "Amp"
 }

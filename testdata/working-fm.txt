@@ -1,0 +1,33 @@
+ Foundation Models Chat
+ model: system · /help for help
+
+ > Say hi in 5 words.
+
+ Hello!
+
+   • Hi there!
+
+
+ > Reply with exactly a markdown blockquote of a two-line famous quote, then the author, then ask if I want another one. This prompt is deliberately long so that it wraps across more than one line of
+ the terminal, which lets me see how wrapped prompts are drawn on screen by the chat interface, thanks so much.
+
+   ─── markdown ───
+   "Be yourself; everyone else is just a borrowed version."
+   — Oscar Wilde
+
+   Want another quote?"
+   ──────
+
+
+ > Write 200 words about moss. End by asking which moss I like best?
+
+ The Quiet Life of Moss
+
+ Moss is a small, resilient plant often overlooked in the rush of daily life. Found in damp forests, shaded sidewalks, and rocky crevices, moss thrives in environments where other plants struggle. It
+ lacks true roots, absorbing moisture and nutrients directly from the air and rain. This adaptability makes it a symbol of endurance and quiet beauty.
+
+ Moss plays a vital role in ecosystems. It helps retain moisture, stabilizes soil, and provides habitat for tiny insects and amphibians. Its
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ system (AFM 3 Core Advanced) · turn 2 · ↑ 246 · ↓ 80 · 326 / 8,192 (3% used)

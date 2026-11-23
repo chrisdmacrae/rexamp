@@ -84,9 +84,10 @@ type Pane struct {
 	WindowID, WindowLabel   string
 	BlockID, Label          string
 	Program                 string // foreground process name
-	Agent                   string // amp, claude, codex, or "" for any other program
+	Agent                   string // amp, claude, codex, fm, or "" for any other program
 	Cwd                     string
 	Title                   string
+	Task                    string // what the agent works on, for an agent that doesn't title its pane
 	State                   string // program status: idle, working, done, blocked, error, or ""
 	Kind                    string // with blocked: permission, question, auth
 	Msg                     string
@@ -96,8 +97,8 @@ type Pane struct {
 	Question                string  // with done: the agent's last paragraph, when it asks something
 }
 
-// IsAgent reports whether a coding agent runs in the pane, whether Amp or
-// Claude Code or Codex started straight from the shell.
+// IsAgent reports whether a coding agent runs in the pane, whether Amp,
+// Claude Code, Codex, or an fm chat started straight from the shell.
 func (p Pane) IsAgent() bool { return p.Agent != "" }
 
 // agentOf names the agent a process is from its name, argv0, and paths. The
@@ -112,6 +113,8 @@ func agentOf(names ...string) string {
 			return "claude"
 		case "codex":
 			return "codex"
+		case "fm":
+			return "fm" // Apple's Foundation Models CLI
 		}
 	}
 	return ""
@@ -294,6 +297,21 @@ func inspectPane(ctx context.Context, p *Pane) {
 		p.Program, p.Cwd = f.Name, f.Cwd
 		p.Agent = agentOf(f.Name, f.Argv0, f.InvokedPath, f.Path)
 	}
+	capture := func() (string, bool) {
+		out, err := run(ctx, 10*time.Second, "rex", rexArgs(p.Server, "capture", "-s", p.SessionID, "-b", p.BlockID, "--trim")...)
+		return string(out), err == nil
+	}
+	if p.Agent == "fm" {
+		// fm reports nothing, so its screen says what it does. A chat fits in
+		// the model's small context, so the scrollback holds all of it.
+		screen, ok := capture()
+		c, chat := parseFM(screen)
+		if !ok || !chat {
+			p.Agent = "" // fm respond, serve, or another command, not a session
+			return
+		}
+		p.State, p.Task, p.Question = c.State, c.Task, c.Question
+	}
 
 	var title struct {
 		Title string `json:"title"`
@@ -310,7 +328,9 @@ func inspectPane(ctx context.Context, p *Pane) {
 			At    time.Time `json:"updated_at"`
 		} `json:"records"`
 	}
-	call(&status, "program_status")
+	if p.Agent != "fm" { // what an earlier program in the pane reported isn't about fm
+		call(&status, "program_status")
+	}
 	// Prefer the most urgent record, so a blocked child beats a working root.
 	best := -1
 	for _, r := range status.Records {
@@ -322,9 +342,9 @@ func inspectPane(ctx context.Context, p *Pane) {
 
 	// A blocked agent shows its menu on screen. One that finished may have
 	// ended its turn by asking something in plain text.
-	if p.IsAgent() && (p.State == "blocked" || p.State == "done") {
-		if out, err := run(ctx, 10*time.Second, "rex", rexArgs(p.Server, "capture", "-s", p.SessionID, "-b", p.BlockID, "--trim")...); err == nil {
-			lines := strings.Split(strings.TrimRight(string(out), " \n"), "\n") // the screen's empty bottom rows
+	if p.IsAgent() && p.Agent != "fm" && (p.State == "blocked" || p.State == "done") {
+		if out, ok := capture(); ok {
+			lines := strings.Split(strings.TrimRight(out, " \n"), "\n") // the screen's empty bottom rows
 			screen := strings.Join(lines[max(0, len(lines)-60):], "\n")
 			if p.State == "blocked" {
 				p.Prompt = parsePrompt(screen)
