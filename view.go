@@ -19,6 +19,7 @@ var (
 	heading = lipgloss.NewStyle().Bold(true).Foreground(accent)
 	panel   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238")).Padding(0, 1)
 	sel     = lipgloss.NewStyle().Background(lipgloss.Color("236"))
+	button  = lipgloss.NewStyle().Background(accent).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1)
 
 	stateStyle = map[string]lipgloss.Style{
 		"working": lipgloss.NewStyle().Foreground(lipgloss.Color("39")),
@@ -70,12 +71,23 @@ func (m *model) View() string {
 	if m.status != "" {
 		help = m.status
 	}
-	out := strings.Join(parts, "\n") + "\n" + truncate(help, w)
+	// The buttons run init.lua's actions, which ask in the Rex app.
+	m.buttons = m.buttons[:0]
+	bar, x := "", 0
+	for _, b := range []struct{ label, action string }{{"Switch to agent ⇧⌘A", "amp_agents"}, {"Reply to agent ⇧⌘R", "amp_reply"}} {
+		r := button.Render(b.label)
+		m.buttons = append(m.buttons, buttonAt{x, x + lipgloss.Width(r), b.action})
+		bar += r + " "
+		x += lipgloss.Width(r) + 1
+	}
+	out := strings.Join(parts, "\n") + "\n" + bar + " " + truncate(help, max(0, w-x-1))
 
-	// Map screen lines to agents for mouse clicks. A view taller than the
-	// terminal loses its top lines.
+	// Map screen lines to agents and buttons for mouse clicks. A view taller
+	// than the terminal loses its top lines.
+	m.buttonY = lipgloss.Height(out) - 1
 	if over := lipgloss.Height(out) - m.height; m.height > 0 && over > 0 {
 		top -= over
+		m.buttonY -= over
 	}
 	m.agentAt = map[int]int{}
 	for line, i := range m.agentLines {

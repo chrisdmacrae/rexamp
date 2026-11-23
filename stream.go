@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"regexp"
@@ -22,6 +24,9 @@ import (
 //	{"op":"choose","block":"block:…","option":1} pick a choice of its prompt, from 0
 //	{"op":"reply","block":"block:…","text":"…"}  type an answer and press Return
 //	{"op":"refresh"}                         reload everything now
+//
+// With -once, it writes one snapshot of the Rex agents and exits, or runs the
+// command given with -cmd. See runOnce.
 
 type streamAgent struct {
 	Block   string    `json:"block"`
@@ -122,6 +127,37 @@ func runStream(cfg config) error {
 	}()
 	_, err := p.Run()
 	return err
+}
+
+// runOnce is -json with -once, for the Rex actions in init.lua. It reads the
+// Rex panes once and writes one snapshot or, given cmd, runs that command on
+// them. It skips usage, threads, and desktop apps, so running it on every key
+// press is quick and spends none of Amp's usage lookups.
+func runOnce(cfg config, cmd string) error {
+	cfg.stream = true
+	s := &streamModel{model: newModel(cfg)}
+	ctx := context.Background()
+	s.rex, s.rexErr = fetchRex(ctx, discoverHosts(ctx))
+	if cmd == "" {
+		writeLine(s.snapshot())
+		return nil
+	}
+	var c commandMsg
+	if err := json.Unmarshal([]byte(cmd), &c); err != nil {
+		return err
+	}
+	if c.Op == "refresh" {
+		return errors.New("refresh only works in the -json stream")
+	}
+	if s.rexErr != nil {
+		return s.rexErr
+	}
+	if f := s.command(c); f != nil {
+		if msg, ok := f().(statusMsg); ok {
+			return errors.New(string(msg))
+		}
+	}
+	return nil
 }
 
 func (s *streamModel) View() string { return "" }

@@ -65,6 +65,23 @@ detect corruption, not a compromised GitHub release publisher. The app must
 be in a writable location, not running from a disk image. Only RexNotch and
 its bundled CLI update; a separate `~/.local/bin/amp-rex-hud` is unchanged.
 
+## Rex actions
+
+`init.lua` adds Rex actions that call `~/.local/bin/amp-rex-hud`. Load it from
+`~/.config/rex/init.lua` with `dofile(os.getenv("HOME") .. "/path/to/rexamp/init.lua")`
+and run `rex config reload`.
+
+- **Shift+Cmd+H, Toggle Amp HUD** opens or closes the live HUD in a split.
+- **Shift+Cmd+A, Switch to Agent…** lists agent panes in the command palette,
+  with the ones that need you first, and shows the one you pick.
+- **Shift+Cmd+R, Reply to Agent…** picks an agent, then offers its on-screen
+  menu (such as a permission prompt) or asks for a reply and sends it.
+
+The last two are also buttons at the bottom of the HUD.
+
+They use `amp-rex-hud -once -json`, which reads Rex once without checking usage,
+and `-cmd` to focus, choose, or reply. Showing a pane needs Remote Control on.
+
 ## Build locally
 
 The CLI requires the Go version specified in `go.mod`:

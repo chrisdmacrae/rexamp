@@ -35,6 +35,7 @@ func main() {
 	flag.StringVar(&cfg.client, "client", os.Getenv("REX_CLIENT"), "Rex app client to show focused panes in (label or ID); empty picks the only app")
 	once := flag.Bool("once", false, "print one plain-text frame and exit")
 	asJSON := flag.Bool("json", false, "run without a screen: write snapshots as JSON lines and read commands from stdin (see stream.go)")
+	cmdJSON := flag.String("cmd", "", "with -once -json: run one command, such as {\"op\":\"focus\",\"block\":\"…\"}, instead of writing a snapshot")
 	flag.Parse()
 
 	// A Rex pane started without a shell, or the notch app, doesn't get the
@@ -47,6 +48,13 @@ func main() {
 	_, err := exec.LookPath("amp")
 	cfg.amp = err == nil
 
+	if *asJSON && *once {
+		if err := runOnce(cfg, *cmdJSON); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *asJSON {
 		if err := runStream(cfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -135,6 +143,30 @@ type model struct {
 	agentAt     map[int]int     // screen line -> agent index, set by View
 	lastClick   time.Time
 	lastClickAt int // agent index of lastClick
+	buttons     []buttonAt // set by View
+	buttonY     int        // screen line of the buttons, set by View
+}
+
+// buttonAt is where View drew a button: columns x0 to x1 of line buttonY.
+type buttonAt struct {
+	x0, x1 int
+	action string
+}
+
+type actionMsg struct{ err error }
+
+// runAction runs one of init.lua's actions, which asks in the Rex app's
+// command palette, and waits for it to be answered.
+func (m *model) runAction(name string) tea.Cmd {
+	args := []string{"do", name}
+	if m.cfg.client != "" {
+		args = append([]string{"-C", m.cfg.client}, args...)
+	}
+	m.status = "Answer in the Rex command palette…"
+	return func() tea.Msg {
+		_, err := run(m.ctx, 15*time.Minute, "rex", args...)
+		return actionMsg{err}
+	}
 }
 
 func newModel(cfg config) *model {
@@ -324,6 +356,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = max(0, min(n-1, m.cursor+1))
 		case msg.Button == tea.MouseButtonWheelUp:
 			m.cursor = max(0, m.cursor-1)
+		case msg.Button == tea.MouseButtonLeft && msg.Y == m.buttonY:
+			for _, b := range m.buttons {
+				if msg.X >= b.x0 && msg.X < b.x1 {
+					return m, m.runAction(b.action)
+				}
+			}
 		case msg.Button == tea.MouseButtonLeft:
 			i, ok := m.agentAt[msg.Y]
 			if !ok || i >= n {
@@ -335,6 +373,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastClick = time.Time{} // a third click starts over
 				return m, m.focus(i)
 			}
+		}
+
+	case actionMsg:
+		m.status = ""
+		if msg.err != nil {
+			m.status = errText.Render(msg.err.Error())
 		}
 
 	case focusedMsg:
