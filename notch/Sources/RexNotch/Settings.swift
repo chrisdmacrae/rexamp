@@ -286,8 +286,12 @@ struct SettingsView: View {
 
     var about: some View {
         VStack(spacing: 13) {
-            DinoIcon(color: .green).scaleEffect(2.5).frame(width: 80, height: 80)
-                .background(Color.black, in: RoundedRectangle(cornerRadius: 18))
+            if let icon = Bundle.main.image(forResource: "AppIcon") {
+                Image(nsImage: icon).resizable().interpolation(.high).frame(width: 96, height: 96)
+            } else {
+                DinoIcon(color: .green).scaleEffect(2.5).frame(width: 80, height: 80)
+                    .background(Color.black, in: RoundedRectangle(cornerRadius: 18))
+            }
             Text("RexNotch").font(.title.bold())
             Text("Your coding agents, at a glance.").foregroundStyle(.secondary)
             Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
