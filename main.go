@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -547,11 +548,20 @@ func (m *model) notify(title, subtitle, body string) {
 	if !m.cfg.stream {
 		fmt.Fprintf(os.Stdout, "\x1b]7501;state=done:app=rex-hud:msg=%s\x1b\\", base64.StdEncoding.EncodeToString([]byte(text)))
 	}
-	if !m.cfg.notify {
+	if !m.cfg.notify || notchAppRunning() {
 		return
 	}
 	script := fmt.Sprintf("display notification %q with title %q subtitle %q", body, title, subtitle)
 	_ = exec.Command("osascript", "-e", script).Start()
+}
+
+// notchAppRunning reports whether RexNotch is up. It posts the same alerts
+// with its own icon and buttons, whereas osascript's carry no icon.
+func notchAppRunning() bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	return exec.Command("pgrep", "-x", "RexNotch").Run() == nil
 }
 
 func firstNonEmpty(s ...string) string {
