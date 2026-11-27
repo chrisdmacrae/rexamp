@@ -85,6 +85,8 @@ type Pane struct {
 	BlockID, Label          string
 	Program                 string // foreground process name
 	Agent                   string // amp, claude, codex, fm, or "" for any other program
+	Headless                bool   // the agent runs below Program, such as under a harness, not as it
+	AgentPID                int    // the agent's process, when on this machine
 	Cwd                     string
 	Title                   string
 	Task                    string // what the agent works on, for an agent that doesn't title its pane
@@ -227,6 +229,11 @@ func fetchHost(ctx context.Context, h Host) (RexSnapshot, error) {
 		return RexSnapshot{}, err
 	}
 
+	var procs *procTree
+	if h.Server == "" {
+		procs = readProcTree(ctx) // this machine's, for agents run headless in a pane
+	}
+
 	var snap RexSnapshot
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -256,7 +263,7 @@ func fetchHost(ctx context.Context, h Host) (RexSnapshot, error) {
 						defer wg.Done()
 						sem <- struct{}{}
 						defer func() { <-sem }()
-						inspectPane(ctx, &p)
+						inspectPane(ctx, &p, procs)
 						mu.Lock()
 						snap.Panes = append(snap.Panes, p)
 						mu.Unlock()
@@ -278,13 +285,16 @@ func fetchHost(ctx context.Context, h Host) (RexSnapshot, error) {
 	return snap, nil
 }
 
-func inspectPane(ctx context.Context, p *Pane) {
+// inspectPane fills in what runs in a pane. procs is this machine's process
+// tree for a local pane, and nil for another host's.
+func inspectPane(ctx context.Context, p *Pane, procs *procTree) {
 	call := func(v any, method string) {
 		_ = rexJSON(ctx, p.Server, v, "block", "call", "-s", p.SessionID, "-b", p.BlockID, method)
 	}
 
 	var proc struct {
 		Foreground *struct {
+			PID         int    `json:"pid"`
 			Name        string `json:"name"`
 			Argv0       string `json:"argv0"`
 			InvokedPath string `json:"invoked_path"`
@@ -296,6 +306,13 @@ func inspectPane(ctx context.Context, p *Pane) {
 	if f := proc.Foreground; f != nil {
 		p.Program, p.Cwd = f.Name, f.Cwd
 		p.Agent = agentOf(f.Name, f.Argv0, f.InvokedPath, f.Path)
+		if p.Agent != "" {
+			p.AgentPID = f.PID
+		} else if f.PID > 0 {
+			// A harness or script in the pane may run Claude Code or Codex headless.
+			p.Agent, p.AgentPID = procs.agentUnder(f.PID)
+			p.Headless = p.Agent != ""
+		}
 	}
 	capture := func() (string, bool) {
 		out, err := run(ctx, 10*time.Second, "rex", rexArgs(p.Server, "capture", "-s", p.SessionID, "-b", p.BlockID, "--trim")...)
@@ -339,10 +356,14 @@ func inspectPane(ctx context.Context, p *Pane) {
 			p.State, p.Kind, p.Msg, p.Since = r.State, r.Kind, r.Msg, r.At
 		}
 	}
+	if p.Headless {
+		headlessState(p)
+	}
 
 	// A blocked agent shows its menu on screen. One that finished may have
 	// ended its turn by asking something in plain text.
-	if p.IsAgent() && p.Agent != "fm" && (p.State == "blocked" || p.State == "done") {
+	// A headless agent's screen is its harness's, so it has neither.
+	if p.IsAgent() && p.Agent != "fm" && !p.Headless && (p.State == "blocked" || p.State == "done") {
 		if out, ok := capture(); ok {
 			lines := strings.Split(strings.TrimRight(out, " \n"), "\n") // the screen's empty bottom rows
 			screen := strings.Join(lines[max(0, len(lines)-60):], "\n")
@@ -372,6 +393,23 @@ func inspectPane(ctx context.Context, p *Pane) {
 				p.Ports = append(p.Ports, o.Port)
 			}
 		}
+	}
+}
+
+// headlessState sets what a headless agent does. Claude Code records its
+// status and name by process, and that beats whatever the harness reported.
+// Codex doesn't, and `codex exec` runs only for its one task, so without a
+// status from the harness it is working.
+func headlessState(p *Pane) {
+	switch p.Agent {
+	case "claude":
+		if r, ok := claudeSessionOf(p.AgentPID); ok {
+			p.State, p.Kind, p.Since = r.state()
+			p.Msg = ""
+			p.Task = cmp.Or(p.Task, r.Name)
+		}
+	case "codex":
+		p.State = cmp.Or(p.State, "working")
 	}
 }
 

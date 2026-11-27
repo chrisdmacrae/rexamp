@@ -240,11 +240,22 @@ func until(_ d: Date, now: Date = .now) -> String {
 
 // MARK: Rows
 
-/// An app's icon with a badge for its agent's state, like a notification's.
+/// The app whose icon stands for an agent run in a Rex pane, if it has one.
+func agentBundle(_ agent: String) -> String? {
+    switch agent {
+    case "claude": "com.anthropic.claudefordesktop"
+    case "codex": "com.openai.codex"
+    default: nil
+    }
+}
+
+/// An app's icon with a badge for its agent's state, like a notification's,
+/// and a smaller icon of the agent that runs in it, if any.
 struct AppIcon: View {
     let bundle: String?
     var symbol = "terminal"
     let state: String
+    var agent: String? = nil // bundle ID of the agent's app
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     @MainActor static var cache: [String: NSImage] = [:]
@@ -258,7 +269,7 @@ struct AppIcon: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .topTrailing) {
             Group {
                 if let b = bundle, let i = Self.icon(b) {
                     Image(nsImage: i).resizable().interpolation(.high)
@@ -269,6 +280,14 @@ struct AppIcon: View {
                 }
             }
             .frame(width: 30, height: 30)
+            .overlay(alignment: .bottomTrailing) {
+                if let a = agent, let i = Self.icon(a) {
+                    Image(nsImage: i).resizable().interpolation(.high)
+                        .frame(width: 16, height: 16)
+                        .shadow(color: .black.opacity(0.35), radius: 1, y: 0.5)
+                        .offset(x: 4, y: 4)
+                }
+            }
             Image(systemName: Palette.symbol(state))
                 .font(.system(size: 7, weight: .bold))
                 .foregroundStyle(.white)
@@ -276,7 +295,7 @@ struct AppIcon: View {
                 .background(Circle().fill(Palette.state(state)))
                 .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
                 .symbolEffect(.pulse, isActive: state == "working" && !reduceMotion)
-                .offset(x: 3, y: 3)
+                .offset(x: 3, y: -3)
         }
         .frame(width: 34, height: 34)
     }
@@ -293,13 +312,14 @@ struct ActivityRow: View {
     var detail: String?
     let time: String
     var help = ""
+    var agent: String? = nil // bundle ID of the agent's app, badged on the icon
     let action: () -> Void
     @State private var hover = false
 
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 10) {
-                AppIcon(bundle: bundle, symbol: symbol, state: state)
+                AppIcon(bundle: bundle, symbol: symbol, state: state, agent: agent)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(title).font(.headline).lineLimit(1)
@@ -345,7 +365,8 @@ struct AgentRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             ActivityRow(bundle: rexBundle, state: agent.shownState, title: agent.task, subtitle: "\(agent.name) · \(agent.session)",
-                        detail: stateLine, time: ago(agent.since, now: now), help: agent.cwd) { model.focus(agent) }
+                        detail: stateLine, time: ago(agent.since, now: now), help: agent.cwd,
+                        agent: agentBundle(agent.agent)) { model.focus(agent) }
                 .overlay(alignment: .bottomTrailing) {
                     // A finished agent waits for your next message, so it takes one here.
                     if agent.state == "done" && !replying {
@@ -604,7 +625,7 @@ struct AskCard: View {
 
     var header: some View {
         HStack(spacing: 10) {
-            AppIcon(bundle: rexBundle, state: "blocked")
+            AppIcon(bundle: rexBundle, state: "blocked", agent: agentBundle(agent.agent))
             VStack(alignment: .leading, spacing: 1) {
                 Text(headline).font(.headline)
                 Text(agent.session).font(.subheadline).foregroundStyle(.secondary)

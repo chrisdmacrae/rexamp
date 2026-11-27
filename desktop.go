@@ -58,40 +58,57 @@ func claudeDesktopSessions() []DesktopSession {
 	files, _ := filepath.Glob(filepath.Join(homeDir, ".claude", "sessions", "*.json"))
 	var out []DesktopSession
 	for _, f := range files {
-		b, err := os.ReadFile(f)
-		if err != nil {
+		r, ok := readClaudeSession(f)
+		if !ok || r.Entrypoint != "claude-desktop" || r.PID <= 0 || !processAlive(r.PID) {
 			continue
 		}
-		var r struct {
-			PID             int    `json:"pid"`
-			SessionID       string `json:"sessionId"`
-			Cwd             string `json:"cwd"`
-			Entrypoint      string `json:"entrypoint"`
-			Name            string `json:"name"`
-			Status          string `json:"status"` // busy, waiting, or idle
-			WaitingFor      string `json:"waitingFor"`
-			StatusUpdatedAt int64  `json:"statusUpdatedAt"`
-		}
-		if json.Unmarshal(b, &r) != nil || r.Entrypoint != "claude-desktop" || r.PID <= 0 || !processAlive(r.PID) {
-			continue
-		}
-		s := DesktopSession{ID: r.SessionID, App: "claude", Task: cmp.Or(r.Name, "new session"), Cwd: r.Cwd, State: "idle"}
-		if r.StatusUpdatedAt > 0 {
-			s.Since = time.UnixMilli(r.StatusUpdatedAt)
-		}
-		switch r.Status {
-		case "busy":
-			s.State = "working"
-		case "waiting":
-			s.State = "blocked"
-			s.Kind = "question"
-			if strings.Contains(strings.ToLower(r.WaitingFor), "permission") {
-				s.Kind = "permission"
-			}
-		}
+		s := DesktopSession{ID: r.SessionID, App: "claude", Task: cmp.Or(r.Name, "new session"), Cwd: r.Cwd}
+		s.State, s.Kind, s.Since = r.state()
 		out = append(out, s)
 	}
 	return out
+}
+
+// claudeSession is a running Claude Code process's entry in
+// ~/.claude/sessions/<pid>.json.
+type claudeSession struct {
+	PID             int    `json:"pid"`
+	SessionID       string `json:"sessionId"`
+	Cwd             string `json:"cwd"`
+	Entrypoint      string `json:"entrypoint"` // claude-desktop, cli, sdk-cli, ...
+	Name            string `json:"name"`
+	Status          string `json:"status"` // busy, waiting, or idle
+	WaitingFor      string `json:"waitingFor"`
+	StatusUpdatedAt int64  `json:"statusUpdatedAt"`
+}
+
+func readClaudeSession(path string) (claudeSession, bool) {
+	var r claudeSession
+	b, err := os.ReadFile(path)
+	return r, err == nil && json.Unmarshal(b, &r) == nil
+}
+
+// claudeSessionOf reads the session of the Claude Code process pid.
+func claudeSessionOf(pid int) (claudeSession, bool) {
+	return readClaudeSession(filepath.Join(homeDir, ".claude", "sessions", strconv.Itoa(pid)+".json"))
+}
+
+// state is the session's status as a pane's: working, blocked, or idle.
+func (r claudeSession) state() (state, kind string, since time.Time) {
+	state = "idle"
+	if r.StatusUpdatedAt > 0 {
+		since = time.UnixMilli(r.StatusUpdatedAt)
+	}
+	switch r.Status {
+	case "busy":
+		state = "working"
+	case "waiting":
+		state, kind = "blocked", "question"
+		if strings.Contains(strings.ToLower(r.WaitingFor), "permission") {
+			kind = "permission"
+		}
+	}
+	return state, kind, since
 }
 
 // chatgptSessions lists recent threads of the ChatGPT (Codex) app while it
