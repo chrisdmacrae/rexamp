@@ -42,6 +42,41 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(Settings(defaults: defaults).values, settings.values)
     }
 
+    @MainActor
+    func testEyeHidesIdleThreadsFromTheList() throws {
+        let suite = "RexNotchTests-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = Settings(defaults: defaults)
+        let model = NotchModel(settings: settings)
+        model.agents = [Agent(block: "rex", host: "host", session: "session", window: "window", agent: "claude",
+                              name: "Claude Code", task: "task", cwd: "/", state: "idle", kind: nil,
+                              msg: nil, since: nil, ports: nil, prompt: nil, question: nil)]
+        model.remote = [RemoteThread(id: "a", title: "A", state: "idle", updated: .now),
+                        RemoteThread(id: "b", title: "B", state: "working", updated: .now)]
+        model.desktop = [DesktopSession(id: "c", app: "claude", name: "Claude", bundle: "claude", task: "t", cwd: "", state: "done", kind: nil, since: nil)]
+        XCTAssertEqual(model.listedItems.count, 2)
+        XCTAssertEqual(model.listedRemote.count, 2)
+        settings.values.hideInactive = true
+        XCTAssertEqual(model.listedItems.map(\.state), ["done"])
+        XCTAssertEqual(model.listedRemote.map(\.id), ["b"])
+        XCTAssertEqual(model.activeCount, 2) // the notch's count doesn't change
+        XCTAssertTrue(Settings(defaults: defaults).values.hideInactive)
+        model.remote = []
+        model.desktop = []
+        XCTAssertTrue(model.hasVisibleSessions)
+        XCTAssertFalse(model.hasListedSessions)
+    }
+
+    func testPreferencesSavedBeforeANewSettingStillLoad() throws {
+        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(Preferences())) as? [String: Any])
+        old.removeValue(forKey: "hideInactive")
+        old["showRemote"] = false
+        let values = try XCTUnwrap(Settings.decode(JSONSerialization.data(withJSONObject: old)))
+        XCTAssertFalse(values.showRemote)
+        XCTAssertFalse(values.hideInactive)
+    }
+
     func testNotificationEventsAreIndependent() {
         var values = Preferences()
         values.notifyCompletion = false

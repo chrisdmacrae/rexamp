@@ -367,6 +367,13 @@ final class NotchModel: ObservableObject {
         }
     }
 
+    /// Whether the list shows something in this state; the eye button hides idle ones.
+    func listed(_ state: String) -> Bool { !settings.values.hideInactive || state != "idle" }
+    /// What the open list shows, after the eye button's filter.
+    var listedItems: [Item] { items.filter { listed($0.state) } }
+    var listedRemote: [RemoteThread] { visibleRemote.filter { listed($0.state) } }
+    var hasListedSessions: Bool { !listedItems.isEmpty || !listedRemote.isEmpty }
+
     /// The most urgent state of anything shown, for the icon beside the notch.
     var topState: String {
         let states = visibleAgents.map(\.shownState) + visibleDesktop.map(\.state)

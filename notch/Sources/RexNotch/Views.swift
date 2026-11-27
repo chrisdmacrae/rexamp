@@ -400,6 +400,27 @@ struct DesktopRow: View {
 
 // MARK: List
 
+/// The eye beside the list's title: shows or hides idle threads.
+struct InactiveToggle: View {
+    @EnvironmentObject var model: NotchModel
+
+    var body: some View {
+        let hidden = model.settings.values.hideInactive
+        Button {
+            model.settings.values.hideInactive.toggle()
+        } label: {
+            Image(systemName: hidden ? "eye.slash" : "eye")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(hidden ? "Show inactive" : "Hide inactive")
+        .accessibilityLabel(hidden ? "Show inactive threads" : "Hide inactive threads")
+    }
+}
+
 struct AgentList: View {
     @EnvironmentObject var model: NotchModel
 
@@ -420,20 +441,26 @@ struct AgentList: View {
                 Divider()
             }
             VStack(alignment: .leading, spacing: 0) {
-                sectionTitle("Agents")
-                ForEach(model.items) { item in
+                HStack {
+                    sectionTitle("Agents")
+                    Spacer()
+                    InactiveToggle().padding(.trailing, 8).padding(.bottom, 4)
+                }
+                ForEach(model.listedItems) { item in
                     switch item {
                     case .pane(let a): AgentRow(agent: a, now: now)
                     case .desktop(let d): DesktopRow(session: d, now: now)
                     }
                 }
-                ForEach(model.visibleRemote) { t in
+                ForEach(model.listedRemote) { t in
                     RemoteRow(thread: t, now: now)
                 }
                 if !model.loaded {
                     note("Reading Rex…")
                 } else if !model.hasVisibleSessions {
                     note("No agents running")
+                } else if !model.hasListedSessions {
+                    note("No active agents")
                 }
                 if model.settings.values.showRex, let e = model.errors["rex"] { note(e, color: Palette.error) }
                 if let s = model.status { note(s, color: Palette.blocked) }

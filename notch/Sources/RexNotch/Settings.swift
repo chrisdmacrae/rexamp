@@ -19,6 +19,7 @@ struct Preferences: Codable, Equatable {
     var showChatGPT = true
     var showUsage = true
     var automaticUpdates = true
+    var hideInactive = false // the eye button in the list hides idle threads
 
     func notifies(state: String) -> Bool {
         switch state {
@@ -49,7 +50,16 @@ final class Settings: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        values = defaults.data(forKey: "preferences").flatMap { try? JSONDecoder().decode(Preferences.self, from: $0) } ?? Preferences()
+        values = defaults.data(forKey: "preferences").flatMap(Self.decode) ?? Preferences()
+    }
+
+    /// Reads saved preferences over the defaults, so ones saved before a
+    /// setting existed keep their values instead of failing to decode.
+    nonisolated static func decode(_ data: Data) -> Preferences? {
+        guard let saved = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let base = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(Preferences())) as? [String: Any],
+              let merged = try? JSONSerialization.data(withJSONObject: base.merging(saved) { _, s in s }) else { return nil }
+        return try? JSONDecoder().decode(Preferences.self, from: merged)
     }
 }
 
