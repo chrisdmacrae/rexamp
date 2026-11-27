@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Variant of https://dashboardicons.com/icons/rex adapted as a macOS notch HUD icon -->
+  <defs>
+    <clipPath id="squircle-clip">
+      <rect x="100" y="100" width="824" height="824" rx="185" ry="185"/>
+    </clipPath>
+
+    <path id="rex-head" fill-rule="evenodd" d="M9.273 1.443c-.364.086-.698.629-.698 1.134 0 .096-.02.195-.13.649-.045.196-.08.25-.268.45-.416.43-.893.457-1.783.1-1.327-.533-1.838-.464-2.09.288-.078.234-.075.32.049.739.275.952.302 1.23.148 1.54-.165.336-.612.628-.959.628-.093 0-.258.024-.36.051-.118.031-.348.052-.599.052-.865 0-1.333.292-1.384.855-.031.337.172.773.46.99 1.433 1.072 1.605 2.144.44 2.762-1.14.608-1.385 1.196-.773 1.862.165.182.285.248 1.288.705.433.199.842.673.842.975 0 .251-.313.688-.618.866-1.168.684-.986 1.54.484 2.271.64.32.65.327.91.835.691 1.343 1.64 2.288 2.78 2.766.113.048.337.14.498.21 1.285.55 3.082.546 4.436-.008.402-.164 1.116-.532 1.233-.639.048-.04.175-.144.285-.23l.327-.247c.223-.168.484-.447.687-.722.106-.147.247-.333.312-.412.062-.079.21-.337.33-.574.371-.742.382-.721-.433-.721-.333 0-.618-.017-.673-.038-.09-.034-.285-.062-.938-.13a5 5 0 0 1-.532-.1 23 23 0 0 0-.533-.124c-1.247-.278-1.752-.457-1.752-.618 0-.186.082-.206.872-.237 1.701-.062 2-.076 2.041-.107.028-.014.227-.041.447-.062.824-.065.986-.082 1.03-.11.025-.013.172-.04.327-.058.756-.082.718-.076 1.88-.45.35-.113.765-.268.927-.344.718-.333.88-.415 1.024-.501a30 30 0 0 0 1.206-.794c.563-.409 1.728-1.615 1.955-2.02.048-.09.13-.22.178-.289.248-.35.656-1.38.794-2.006.072-.34.082-1.491.014-1.821-.12-.574-.224-.952-.327-1.182-.134-.31-.44-.876-.57-1.055a6.4 6.4 0 0 0-.65-.804 5 5 0 0 1-.278-.309 1 1 0 0 0-.161-.154l-.395-.32c-.577-.467-.739-.567-1.673-1.04-.743-.379-1.89-.788-2.457-.874a5 5 0 0 1-.412-.092c-.248-.066-.454-.093-1.237-.162a3.4 3.4 0 0 1-.481-.069c-.155-.048-1.381-.048-1.563 0a4 4 0 0 1-.55.066 5 5 0 0 0-.505.055c-.083.017-.113 0-.217-.11-.728-.797-1.013-1.045-1.429-1.22-.26-.113-.556-.148-.776-.096m.068 9.42c.708.227 1.735 1.34 1.931 2.096.22.845.052 1.36-.683 2.113-.811.828-1.244.942-1.98.512-.236-.137-1.164-1.089-1.277-1.312-.557-1.086-.423-1.852.477-2.735.735-.722 1.003-.838 1.532-.673"/>
+
+    <filter id="icon-shadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.22"/>
+    </filter>
+
+    <filter id="notch-shadow" x="-20%" y="-10%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#0F172A" flood-opacity="0.24"/>
+    </filter>
+
+    <filter id="dino-shadow" x="-20%" y="-20%" width="140%" height="145%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#7E22CE" flood-opacity="0.22"/>
+    </filter>
+
+    <filter id="dot-glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <linearGradient id="bg-base" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="55%" stop-color="#FAF9FC"/>
+      <stop offset="100%" stop-color="#F2EFF8"/>
+    </linearGradient>
+
+    <radialGradient id="bg-glow-cyan" cx="14%" cy="88%" r="55%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="bg-glow-warm" cx="88%" cy="22%" r="55%">
+      <stop offset="0%" stop-color="#FB923C" stop-opacity="0.14"/>
+      <stop offset="50%" stop-color="#F472B6" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#F472B6" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="notch-fill" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1B1C24"/>
+      <stop offset="100%" stop-color="#070709"/>
+    </linearGradient>
+
+    <linearGradient id="dino-grad" x1="8%" y1="88%" x2="88%" y2="12%">
+      <stop offset="0%" stop-color="#00D4FF"/>
+      <stop offset="22%" stop-color="#8B5CF6"/>
+      <stop offset="44%" stop-color="#EC4899"/>
+      <stop offset="68%" stop-color="#FF6B2C"/>
+      <stop offset="92%" stop-color="#FFB800"/>
+      <stop offset="100%" stop-color="#FFE135"/>
+    </linearGradient>
+
+    <radialGradient id="dino-sheen" cx="74%" cy="26%" r="44%">
+      <stop offset="0%" stop-color="#FFF7AD" stop-opacity="0.58"/>
+      <stop offset="45%" stop-color="#FF9E1B" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#FF9E1B" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="dino-shade" cx="30%" cy="82%" r="55%">
+      <stop offset="0%" stop-color="#3B0764" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#3B0764" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="eye-fill" cx="38%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#2D156B"/>
+      <stop offset="60%" stop-color="#1A0944"/>
+      <stop offset="100%" stop-color="#0E0429"/>
+    </radialGradient>
+
+    <radialGradient id="status-dot" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#86EFAC"/>
+      <stop offset="55%" stop-color="#22C55E"/>
+      <stop offset="100%" stop-color="#16A34A"/>
+    </radialGradient>
+
+    <radialGradient id="lens-glass" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#2E4B7C"/>
+      <stop offset="55%" stop-color="#0D1629"/>
+      <stop offset="100%" stop-color="#04070E"/>
+    </radialGradient>
+  </defs>
+
+  <g filter="url(#icon-shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#bg-base)"/>
+  </g>
+
+  <g clip-path="url(#squircle-clip)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#bg-glow-cyan)"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#bg-glow-warm)"/>
+
+    <rect x="100" y="100" width="824" height="88" fill="#0F172A" fill-opacity="0.045"/>
+    <line x1="100" y1="188" x2="924" y2="188" stroke="#0F172A" stroke-opacity="0.08" stroke-width="2"/>
+
+    <g filter="url(#dino-shadow)">
+      <g transform="translate(218, 286) scale(24.5)">
+        <ellipse cx="9.2" cy="13.0" rx="3.4" ry="4.0" fill="url(#eye-fill)"/>
+        <use href="#rex-head" fill="url(#dino-grad)"/>
+        <use href="#rex-head" fill="url(#dino-sheen)"/>
+        <use href="#rex-head" fill="url(#dino-shade)"/>
+      </g>
+    </g>
+
+    <g filter="url(#notch-shadow)">
+      <path d="M 270 100
+               Q 298 100 298 128
+               L 298 194
+               Q 298 238 342 238
+               L 682 238
+               Q 726 238 726 194
+               L 726 128
+               Q 726 100 754 100
+               Z"
+            fill="url(#notch-fill)"/>
+      <path d="M 300 128
+               L 300 194
+               Q 300 236 342 236
+               L 682 236
+               Q 724 236 724 194
+               L 724 128"
+            fill="none" stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="2.5"/>
+    </g>
+
+    <g transform="translate(366, 171)">
+      <circle cx="0" cy="0" r="28" fill="#22C55E" fill-opacity="0.16"/>
+      <circle cx="0" cy="0" r="15" fill="url(#status-dot)" filter="url(#dot-glow)"/>
+    </g>
+
+    <g transform="translate(512, 171)">
+      <circle cx="0" cy="0" r="21" fill="#1E2028" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="1.5"/>
+      <circle cx="0" cy="0" r="13.5" fill="url(#lens-glass)"/>
+      <circle cx="-4.2" cy="-4.2" r="3.0" fill="#7DD3FC" fill-opacity="0.75"/>
+    </g>
+
+    <g transform="translate(652, 171)">
+      <rect x="-40" y="-20" width="80" height="40" rx="20" ry="20"
+            fill="#FFFFFF" fill-opacity="0.16" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="1.5"/>
+      <rect x="-18" y="-4" width="36" height="8" rx="4" fill="#FFFFFF" fill-opacity="0.88"/>
+    </g>
+
+    <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" ry="183.5"
+          fill="none" stroke="#FFFFFF" stroke-opacity="0.85" stroke-width="3"/>
+    <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" ry="184.5"
+          fill="none" stroke="#0F172A" stroke-opacity="0.08" stroke-width="1"/>
+  </g>
+</svg>

@@ -15,7 +15,7 @@ done
 cd "$(dirname "$0")"
 app=build/RexNotch.app
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 set --
 if "$universal"; then
   set -- --arch arm64 --arch x86_64
@@ -35,6 +35,7 @@ fi
 # The CLI was named amp-rex-hud, and RexNotch 0.3 only installs an update
 # that has it, so keep the old name as a link.
 ln -s rex-hud "$app/Contents/MacOS/amp-rex-hud"
+cp Assets/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -42,6 +43,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>RexNotch</string>
   <key>CFBundleIdentifier</key><string>com.chrisdmacrae.rexnotch</string>
   <key>CFBundleExecutable</key><string>RexNotch</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION:-0.1}</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
